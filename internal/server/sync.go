@@ -18,6 +18,8 @@ import (
 const (
 	maxSyncRecords = 1000
 	maxSyncText    = 16 * 1024
+	maxNoteID      = 512
+	maxNotePage    = 1<<31 - 1
 	maxMetadata    = 1024 * 1024
 	maxTags        = 100
 	maxFutureSkew  = 24 * time.Hour
@@ -133,6 +135,30 @@ type configWire struct {
 	DBDeletedAt    optionalTime   `json:"deleted_at"`
 }
 
+type noteWire struct {
+	BookHash    string         `json:"bookHash"`
+	DBBookHash  string         `json:"book_hash"`
+	MetaHash    optionalString `json:"metaHash"`
+	DBMetaHash  optionalString `json:"meta_hash"`
+	ID          string         `json:"id"`
+	Type        optionalString `json:"type"`
+	CFI         optionalString `json:"cfi"`
+	XPointer0   optionalString `json:"xpointer0"`
+	XPointer1   optionalString `json:"xpointer1"`
+	Text        optionalString `json:"text"`
+	Style       optionalString `json:"style"`
+	Color       optionalString `json:"color"`
+	Note        optionalString `json:"note"`
+	Page        *int64         `json:"page"`
+	Global      *bool          `json:"global"`
+	CreatedAt   optionalTime   `json:"createdAt"`
+	DBCreatedAt optionalTime   `json:"created_at"`
+	UpdatedAt   optionalTime   `json:"updatedAt"`
+	DBUpdatedAt optionalTime   `json:"updated_at"`
+	DeletedAt   optionalTime   `json:"deletedAt"`
+	DBDeletedAt optionalTime   `json:"deleted_at"`
+}
+
 type syncPayload struct {
 	Books     []json.RawMessage `json:"books"`
 	Configs   []json.RawMessage `json:"configs"`
@@ -155,7 +181,7 @@ func (s *Server) pullSync(c *gin.Context) {
 	}
 	since := time.UnixMilli(int64(sinceFloat)).UTC()
 	syncType := c.Query("type")
-	if syncType != "" && syncType != "books" && syncType != "configs" {
+	if syncType != "" && syncType != "books" && syncType != "configs" && syncType != "notes" {
 		jsonError(c, http.StatusBadRequest, "Unsupported sync type")
 		return
 	}
@@ -175,7 +201,7 @@ func (s *Server) pullSync(c *gin.Context) {
 		limit = min(parsed, maxSyncRecords)
 	}
 
-	response := gin.H{"books": []any{}, "configs": []any{}}
+	response := gin.H{"books": []any{}, "configs": []any{}, "notes": []any{}}
 	if syncType == "" || syncType == "books" {
 		books, queryErr := s.queryBooks(user.ID, since, bookFilter, metaFilter, limit, syncType == "books")
 		if queryErr != nil {
@@ -202,6 +228,15 @@ func (s *Server) pullSync(c *gin.Context) {
 		}
 		response["configs"] = configs
 	}
+	if syncType == "" || syncType == "notes" {
+		notes, queryErr := s.queryNotes(user.ID, since, bookFilter, metaFilter)
+		if queryErr != nil {
+			logInternal("pull notes", queryErr)
+			jsonError(c, http.StatusInternalServerError, "Unable to pull notes")
+			return
+		}
+		response["notes"] = notes
+	}
 	c.JSON(http.StatusOK, response)
 }
 
@@ -212,7 +247,7 @@ func (s *Server) pushSync(c *gin.Context) {
 		jsonError(c, http.StatusBadRequest, "Invalid sync data")
 		return
 	}
-	if len(payload.Books) > maxSyncRecords || len(payload.Configs) > maxSyncRecords || len(payload.Notes) > 0 || len(payload.StatBooks) > 0 || len(payload.StatPages) > 0 {
+	if len(payload.Books) > maxSyncRecords || len(payload.Configs) > maxSyncRecords || len(payload.Notes) > maxSyncRecords || len(payload.StatBooks) > 0 || len(payload.StatPages) > 0 {
 		jsonError(c, http.StatusBadRequest, "Unsupported or excessive sync data")
 		return
 	}
@@ -234,9 +269,19 @@ func (s *Server) pushSync(c *gin.Context) {
 		}
 		configRows = append(configRows, row)
 	}
+	noteRows := make([]model.BookNote, 0, len(payload.Notes))
+	for _, raw := range payload.Notes {
+		row, err := decodeNote(raw, user.ID)
+		if err != nil {
+			jsonError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		noteRows = append(noteRows, row)
+	}
 
 	var authoritativeBooks []model.Book
 	var authoritativeConfigs []model.BookConfig
+	var authoritativeNotes []model.BookNote
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		batchTime := time.Now().UTC()
 		var err error
@@ -245,6 +290,10 @@ func (s *Server) pushSync(c *gin.Context) {
 			return err
 		}
 		authoritativeConfigs, err = mergeConfigs(tx, configRows, batchTime)
+		if err != nil {
+			return err
+		}
+		authoritativeNotes, err = mergeNotes(tx, noteRows, batchTime)
 		if err != nil {
 			return err
 		}
@@ -263,7 +312,11 @@ func (s *Server) pushSync(c *gin.Context) {
 	for i := range authoritativeConfigs {
 		configs = append(configs, configResponse(&authoritativeConfigs[i]))
 	}
-	c.JSON(http.StatusOK, gin.H{"books": books, "configs": configs})
+	notes := make([]any, 0, len(authoritativeNotes))
+	for i := range authoritativeNotes {
+		notes = append(notes, noteResponse(&authoritativeNotes[i]))
+	}
+	c.JSON(http.StatusOK, gin.H{"books": books, "configs": configs, "notes": notes})
 }
 
 func (s *Server) queryBooks(userID string, since time.Time, bookFilter, metaFilter string, limit int, paged bool) ([]any, error) {
@@ -311,6 +364,20 @@ func (s *Server) queryConfigs(userID string, since time.Time, bookFilter, metaFi
 	result := make([]any, 0, len(rows))
 	for i := range rows {
 		result = append(result, configResponse(&rows[i]))
+	}
+	return result, nil
+}
+
+func (s *Server) queryNotes(userID string, since time.Time, bookFilter, metaFilter string) ([]any, error) {
+	query := s.db.Where("user_id = ? AND (updated_at > ? OR deleted_at > ?)", userID, since, since)
+	query = applyBookFilters(query, bookFilter, metaFilter)
+	var rows []model.BookNote
+	if err := query.Order("updated_at DESC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	result := make([]any, 0, len(rows))
+	for i := range rows {
+		result = append(result, noteResponse(&rows[i]))
 	}
 	return result, nil
 }
@@ -429,6 +496,50 @@ func mergeConfigs(tx *gorm.DB, incoming []model.BookConfig, batchTime time.Time)
 			client.UserID = server.UserID
 			client.BookHash = server.BookHash
 			if err := tx.Omit("User").Save(&client).Error; err != nil {
+				return nil, err
+			}
+			result = append(result, client)
+		} else {
+			result = append(result, server)
+		}
+	}
+	return result, nil
+}
+
+func mergeNotes(tx *gorm.DB, incoming []model.BookNote, batchTime time.Time) ([]model.BookNote, error) {
+	result := make([]model.BookNote, 0, len(incoming))
+	for _, client := range incoming {
+		var server model.BookNote
+		err := tx.Where("user_id = ? AND book_hash = ? AND id = ?", client.UserID, client.BookHash, client.ID).First(&server).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			client.UpdatedAt = batchTime
+			if client.CreatedAt == nil {
+				client.CreatedAt = timePointer(batchTime)
+			}
+			if err := tx.Create(&client).Error; err != nil {
+				return nil, err
+			}
+			result = append(result, client)
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if noteVersionMillis(&client) > noteVersionMillis(&server) {
+			client.UserID = server.UserID
+			client.BookHash = server.BookHash
+			client.ID = server.ID
+			client.Payload = server.Payload
+			if client.Payload == "" {
+				client.Payload = "{}"
+			}
+			if client.CreatedAt == nil {
+				client.CreatedAt = server.CreatedAt
+			}
+			if client.UpdatedAt.IsZero() {
+				client.UpdatedAt = server.UpdatedAt
+			}
+			if err := tx.Save(&client).Error; err != nil {
 				return nil, err
 			}
 			result = append(result, client)
@@ -577,6 +688,52 @@ func decodeConfig(raw json.RawMessage, userID string) (model.BookConfig, error) 
 	}, nil
 }
 
+func decodeNote(raw json.RawMessage, userID string) (model.BookNote, error) {
+	var wire noteWire
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return model.BookNote{}, errors.New("Invalid note record")
+	}
+	hash := firstNonEmpty(wire.BookHash, wire.DBBookHash)
+	if !isBookHash(hash) {
+		return model.BookNote{}, errors.New("Invalid book hash")
+	}
+	id := wire.ID
+	if id == "" || len(id) > maxNoteID || strings.ContainsRune(id, '\x00') {
+		return model.BookNote{}, errors.New("Invalid note ID")
+	}
+	noteType := chooseString(wire.Type)
+	if noteType == nil || (*noteType != "bookmark" && *noteType != "annotation") {
+		return model.BookNote{}, errors.New("Invalid note type")
+	}
+	metaHash := chooseString(wire.MetaHash, wire.DBMetaHash)
+	created := chooseTime(wire.CreatedAt, wire.DBCreatedAt)
+	updated := chooseTime(wire.UpdatedAt, wire.DBUpdatedAt)
+	deleted := chooseTime(wire.DeletedAt, wire.DBDeletedAt)
+	for _, value := range []*string{metaHash, wire.CFI.Value, wire.XPointer0.Value, wire.XPointer1.Value, wire.Text.Value, wire.Style.Value, wire.Color.Value, wire.Note.Value} {
+		if err := validateSyncString(value); err != nil {
+			return model.BookNote{}, err
+		}
+	}
+	for _, value := range []*time.Time{created, updated, deleted} {
+		if err := validateClientTime(value); err != nil {
+			return model.BookNote{}, err
+		}
+	}
+	if wire.Page != nil && (*wire.Page < 0 || *wire.Page > maxNotePage) {
+		return model.BookNote{}, errors.New("Invalid note page")
+	}
+	var updatedAt time.Time
+	if updated != nil {
+		updatedAt = *updated
+	}
+	return model.BookNote{
+		UserID: userID, BookHash: hash, ID: id, MetaHash: cleanPointer(metaHash), Type: *noteType,
+		CFI: cleanPointer(wire.CFI.Value), XPointer0: cleanPointer(wire.XPointer0.Value), XPointer1: cleanPointer(wire.XPointer1.Value),
+		Text: cleanPointer(wire.Text.Value), Style: cleanPointer(wire.Style.Value), Color: cleanPointer(wire.Color.Value), Note: cleanPointer(wire.Note.Value),
+		Page: wire.Page, Global: wire.Global, CreatedAt: created, UpdatedAt: updatedAt, DeletedAt: deleted, Payload: "{}",
+	}, nil
+}
+
 func parseWireTime(raw []byte) (*time.Time, error) {
 	var millisValue float64
 	if err := json.Unmarshal(raw, &millisValue); err == nil {
@@ -717,6 +874,17 @@ func configResponse(config *model.BookConfig) gin.H {
 	}
 }
 
+func noteResponse(note *model.BookNote) gin.H {
+	return gin.H{
+		"user_id": note.UserID, "book_hash": note.BookHash, "meta_hash": valueOrNil(note.MetaHash),
+		"id": note.ID, "type": note.Type, "cfi": valueOrNil(note.CFI),
+		"xpointer0": valueOrNil(note.XPointer0), "xpointer1": valueOrNil(note.XPointer1),
+		"text": valueOrNil(note.Text), "style": valueOrNil(note.Style), "color": valueOrNil(note.Color),
+		"note": valueOrNil(note.Note), "page": int64OrNil(note.Page), "global": boolOrNil(note.Global),
+		"created_at": nullableTime(note.CreatedAt), "updated_at": formatTime(note.UpdatedAt), "deleted_at": nullableTime(note.DeletedAt),
+	}
+}
+
 func decodedOrNil(value *string) any {
 	if value == nil {
 		return nil
@@ -729,6 +897,20 @@ func decodedOrNil(value *string) any {
 }
 
 func valueOrNil(value *string) any {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+func int64OrNil(value *int64) any {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+func boolOrNil(value *bool) any {
 	if value == nil {
 		return nil
 	}
@@ -798,6 +980,14 @@ func millis(value *time.Time) int64 {
 		return 0
 	}
 	return value.UnixMilli()
+}
+
+func noteVersionMillis(note *model.BookNote) int64 {
+	updated := int64(0)
+	if !note.UpdatedAt.IsZero() {
+		updated = note.UpdatedAt.UnixMilli()
+	}
+	return max(updated, millis(note.DeletedAt))
 }
 
 func stringPointersEqual(left, right *string) bool {

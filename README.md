@@ -6,7 +6,7 @@ Implemented client contracts:
 
 - `GET /runtime-config.js` for Readest's custom server endpoint form
 - Supabase Auth-compatible email/password login, refresh, user update, logout, and password recovery under `/auth/v1`; public signup is disabled
-- `GET/POST /api/sync` for books and reading configs, including server cursors, paged pulls, whole-row LWW, and field-level cover/reading-status/metadata merges
+- `GET/POST /api/sync` for books, reading configs, bookmarks, and annotations, including deletion tombstones, server cursors, paged pulls, LWW conflict handling, and field-level cover/reading-status/metadata merges
 - `/api/storage/upload`, `/download`, `/list`, and `/delete`, backed by short-lived signed local upload/download URLs
 - `/admin/` for administrator-only account creation, deletion, usage statistics, and per-account storage quotas
 
@@ -77,6 +77,7 @@ Important production settings:
 - Account deletion revokes sessions, deletes synchronized rows, and removes the account's confined object directory.
 - Refresh tokens are random, stored only as SHA-256 hashes, rotated atomically, and rejected on replay.
 - Every GORM query for user data includes the authenticated user ID. Client-supplied `user_id` values are ignored.
+- Bookmark and annotation rows use the authenticated user plus `book_hash` and note `id` as their key; deleted records remain as tombstones so stale devices cannot recreate them.
 - Sync payloads, timestamps, JSON size, record counts, and text lengths are bounded.
 - HTTP body I/O and SMTP operations have deadlines; panic recovery never logs request headers or signed query strings.
 - Storage keys must exactly match `Readest/Books/<32-hex-hash>/<supported-file>` in raw and decoded form.
@@ -103,4 +104,4 @@ go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
 go run github.com/securego/gosec/v2/cmd/gosec@v2.28.0 -quiet ./...
 ```
 
-Tests cover administrator bootstrap, disabled signup, administrator authorization, account creation/deletion, exact per-account quota enforcement, usage statistics, the Supabase-compatible session lifecycle, token replay and revocation, dangerous configuration rejection, tenant isolation, book/config merge and cursor behavior, path traversal rejection, signed upload size/replay enforcement, and cross-account storage access.
+Tests cover administrator bootstrap, disabled signup, administrator authorization, account creation/deletion, exact per-account quota enforcement, usage statistics, the Supabase-compatible session lifecycle, token replay and revocation, dangerous configuration rejection, tenant isolation, book/config/note merge and cursor behavior, bookmark tombstones, legacy note-schema migration, path traversal rejection, signed upload size/replay enforcement, and cross-account storage access.

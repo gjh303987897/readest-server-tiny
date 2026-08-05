@@ -84,12 +84,26 @@ type BookConfig struct {
 }
 
 type BookNote struct {
-	UserID    string     `gorm:"type:text;primaryKey"`
-	BookHash  string     `gorm:"type:text;primaryKey"`
-	ID        string     `gorm:"type:text;primaryKey"`
-	Payload   string     `gorm:"type:text;not null"`
+	UserID    string `gorm:"type:text;primaryKey"`
+	BookHash  string `gorm:"type:text;primaryKey"`
+	ID        string `gorm:"type:text;primaryKey"`
+	MetaHash  *string
+	Type      string `gorm:"type:text"`
+	CFI       *string
+	XPointer0 *string
+	XPointer1 *string
+	Text      *string
+	Style     *string
+	Color     *string
+	Note      *string
+	Page      *int64
+	Global    *bool
+	CreatedAt *time.Time `gorm:"autoCreateTime:false"`
 	UpdatedAt time.Time  `gorm:"autoUpdateTime:false;index"`
 	DeletedAt *time.Time `gorm:"index"`
+
+	// Payload keeps pre-bookmark databases migratable; sync uses typed columns.
+	Payload string `gorm:"type:text;not null"`
 }
 
 type File struct {

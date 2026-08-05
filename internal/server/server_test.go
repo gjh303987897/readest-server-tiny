@@ -751,7 +751,7 @@ func TestConfigSyncPiggybacksProgressAndRejectsUnsupportedData(t *testing.T) {
 	if res.StatusCode != http.StatusOK || len(isolated["configs"].([]any)) != 0 {
 		t.Fatalf("config leaked across tenants: %d %#v", res.StatusCode, isolated)
 	}
-	res, _ = a.request(http.MethodPost, "/api/sync", map[string]any{"notes": []any{map[string]any{"id": "unsupported"}}}, token)
+	res, _ = a.request(http.MethodPost, "/api/sync", map[string]any{"statBooks": []any{map[string]any{"id": "unsupported"}}}, token)
 	if res.StatusCode != http.StatusBadRequest {
 		t.Fatalf("unsupported sync collection accepted: %d", res.StatusCode)
 	}
