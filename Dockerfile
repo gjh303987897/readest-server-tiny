@@ -1,4 +1,8 @@
-FROM node:24-alpine AS admin-build
+ARG NODE_IMAGE=node:24-alpine
+ARG GO_IMAGE=golang:1.25-alpine
+ARG ALPINE_IMAGE=alpine:3.21
+
+FROM ${NODE_IMAGE} AS admin-build
 
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 WORKDIR /src/web/admin
@@ -7,7 +11,7 @@ RUN npm ci --registry=${NPM_REGISTRY}
 COPY web/admin ./
 RUN npm run build
 
-FROM golang:1.25-alpine AS build
+FROM ${GO_IMAGE} AS build
 
 ARG GOPROXY=https://goproxy.cn,direct
 ENV GOPROXY=${GOPROXY} CGO_ENABLED=1
@@ -20,7 +24,7 @@ COPY . .
 COPY --from=admin-build /src/web/admin/dist ./web/admin/dist
 RUN go build -trimpath -ldflags="-s -w" -o /out/readest-server ./cmd/readest-server
 
-FROM alpine:3.21
+FROM ${ALPINE_IMAGE}
 RUN apk add --no-cache ca-certificates tzdata \
     && addgroup -S readest \
     && adduser -S -G readest -h /app readest \

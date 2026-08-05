@@ -1,19 +1,24 @@
 services:
   readest-backend:
+    image: ${READEST_IMAGE:-readest-tiny-backend:latest}
     build:
       context: .
       args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:24-alpine}
+        GO_IMAGE: ${GO_IMAGE:-golang:1.25-alpine}
+        ALPINE_IMAGE: ${ALPINE_IMAGE:-alpine:3.21}
         GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
     restart: unless-stopped
     init: true
     ports:
-      - "127.0.0.1:8080:8080"
+      - "${BIND_HOST:-127.0.0.1}:${PORT:-8080}:8080"
     environment:
       APP_ENV: ${APP_ENV:-development}
       ADDR: :8080
       PUBLIC_URL: ${PUBLIC_URL:-http://127.0.0.1:8080}
       PUBLIC_ANON_KEY: ${PUBLIC_ANON_KEY:-readest-public-anon-key}
+      JWT_SECRET: ${JWT_SECRET:-}
       INITIAL_ADMIN_EMAIL: ${INITIAL_ADMIN_EMAIL:-admin@readest.local}
       INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
       DATA_DIR: /app/data

@@ -43,12 +43,15 @@ Back up the whole `data` directory. Losing `jwt-secret` signs out all clients; l
 Docker:
 
 ```powershell
+$env:NODE_IMAGE = 'your-trusted-registry/library/node:24-alpine' # optional
+$env:GO_IMAGE = 'your-trusted-registry/library/golang:1.25-alpine' # optional
+$env:ALPINE_IMAGE = 'your-trusted-registry/library/alpine:3.21' # optional
 $env:GOPROXY = 'https://goproxy.cn,direct'
 docker compose up --build
 docker compose exec readest-backend cat /app/data/initial-admin-credentials.json
 ```
 
-Compose persists state in the `readest-data` named volume so the non-root container keeps correct ownership. Include that volume in backups; `docker compose down` preserves it, while `docker compose down -v` deliberately deletes it.
+The base-image overrides are only needed when Docker Hub is unavailable; point them at a registry you trust. Compose also accepts `BIND_HOST`, `PORT`, and `READEST_IMAGE`. It persists state in the `readest-data` named volume so the non-root container keeps correct ownership. Include that volume in backups; `docker compose down` preserves it, while `docker compose down -v` deliberately deletes it.
 
 ## Configuration
 
