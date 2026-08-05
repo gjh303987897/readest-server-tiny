@@ -40,12 +40,12 @@ func NewManager(secret []byte) *Manager {
 	return &Manager{secret: append([]byte(nil), secret...)}
 }
 
-func (m *Manager) IssueAccess(issuer, userID, email, sessionID string, usage, quota int64, ttl time.Duration) (string, int64, error) {
+func (m *Manager) IssueAccess(issuer, userID, email, sessionID string, usage, baseQuota, effectiveQuota int64, ttl time.Duration) (string, int64, error) {
 	now := time.Now().UTC()
 	expires := now.Add(ttl)
 	claims := AccessClaims{
 		Email: email, Role: "authenticated", SessionID: sessionID, Plan: "free",
-		StorageUsageBytes: usage, StoragePurchasedBytes: max(0, quota-500*1024*1024),
+		StorageUsageBytes: usage, StoragePurchasedBytes: effectiveQuota - baseQuota,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer: issuer + "/auth/v1", Subject: userID,
 			Audience: jwt.ClaimStrings{"authenticated"},

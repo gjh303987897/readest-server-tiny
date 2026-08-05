@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"github.com/readest/readest-tiny-backend/internal/config"
 	"github.com/readest/readest-tiny-backend/internal/model"
 	"github.com/readest/readest-tiny-backend/internal/security"
+	adminui "github.com/readest/readest-tiny-backend/web/admin"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -33,11 +35,15 @@ type Server struct {
 	publicURL string
 	limiter   *fixedWindowLimiter
 	storage   *os.Root
+	adminUI   fs.FS
 }
 
 func New(cfg config.Config) (*Server, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
+	}
+	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
+		return nil, fmt.Errorf("create data directory: %w", err)
 	}
 	if err := os.MkdirAll(cfg.StorageDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create storage directory: %w", err)
@@ -76,6 +82,9 @@ func New(cfg config.Config) (*Server, error) {
 	); err != nil {
 		return nil, fmt.Errorf("migrate database: %w", err)
 	}
+	if err := ensureInitialAdmin(db, cfg); err != nil {
+		return nil, err
+	}
 
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
@@ -89,9 +98,14 @@ func New(cfg config.Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open storage root: %w", err)
 	}
+	adminFiles, err := adminui.Files()
+	if err != nil {
+		_ = storageRoot.Close()
+		return nil, fmt.Errorf("open embedded administrator panel: %w", err)
+	}
 	s := &Server{
 		cfg: cfg, db: db, engine: engine, tokens: security.NewManager(cfg.JWTSecret),
-		publicURL: cfg.PublicURL, limiter: newFixedWindowLimiter(), storage: storageRoot,
+		publicURL: cfg.PublicURL, limiter: newFixedWindowLimiter(), storage: storageRoot, adminUI: adminFiles,
 	}
 	s.registerMiddleware()
 	s.registerRoutes()
@@ -136,6 +150,9 @@ func (s *Server) registerMiddleware() {
 }
 
 func (s *Server) registerRoutes() {
+	s.engine.GET("/", func(c *gin.Context) { c.Redirect(http.StatusTemporaryRedirect, "/admin/") })
+	s.engine.GET("/admin", func(c *gin.Context) { c.Redirect(http.StatusTemporaryRedirect, "/admin/") })
+	s.engine.GET("/admin/*path", s.serveAdminUI)
 	s.engine.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	s.engine.GET("/runtime-config.js", s.runtimeConfig)
 	s.engine.OPTIONS("/*path", func(c *gin.Context) { c.Status(http.StatusNoContent) })
@@ -143,7 +160,9 @@ func (s *Server) registerRoutes() {
 	auth := s.engine.Group("/auth/v1")
 	auth.GET("/verify", s.rateLimitMiddleware("auth-verify", s.cfg.AuthRatePerMinute), s.verifyEmailToken)
 	auth.Use(s.apiKeyMiddleware(), s.rateLimitMiddleware("auth", s.cfg.AuthRatePerMinute))
-	auth.POST("/signup", s.signup)
+	auth.POST("/signup", func(c *gin.Context) {
+		authError(c, http.StatusForbidden, "signup_disabled", "Accounts can only be created by an administrator")
+	})
 	auth.POST("/token", s.token)
 	auth.POST("/recover", s.recover)
 	auth.GET("/user", s.authRequired(), s.getUser)
@@ -158,6 +177,13 @@ func (s *Server) registerRoutes() {
 	api.POST("/storage/download", s.createDownload)
 	api.GET("/storage/list", s.listFiles)
 	api.DELETE("/storage/delete", s.deleteFile)
+
+	admin := s.engine.Group("/api/admin", s.rateLimitMiddleware("admin", s.cfg.APIRatePerMinute), s.authRequired(), s.adminRequired())
+	admin.GET("/session", s.adminSession)
+	admin.GET("/users", s.listAdminUsers)
+	admin.POST("/users", s.createAdminUser)
+	admin.PATCH("/users/:id/quota", s.updateAdminUserQuota)
+	admin.DELETE("/users/:id", s.deleteAdminUser)
 
 	objects := s.engine.Group("/api/storage/object", s.rateLimitMiddleware("storage-object", s.cfg.APIRatePerMinute))
 	objects.PUT("", s.uploadObject)
@@ -251,7 +277,7 @@ func (s *Server) corsMiddleware() gin.HandlerFunc {
 			}
 		}
 		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, apikey, x-client-info")
-		c.Header("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS")
 		c.Header("Access-Control-Expose-Headers", "Content-Length, X-Content-Length, Content-Disposition")
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)

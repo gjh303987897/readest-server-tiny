@@ -3,14 +3,16 @@ package model
 import "time"
 
 type User struct {
-	ID               string `gorm:"type:text;primaryKey"`
-	Email            string `gorm:"type:text;uniqueIndex;not null"`
-	PasswordHash     string `gorm:"type:text;not null"`
-	UserMetadata     string `gorm:"type:text;not null;default:'{}'"`
-	EmailConfirmedAt *time.Time
-	LastSignInAt     *time.Time
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	ID                string `gorm:"type:text;primaryKey"`
+	Email             string `gorm:"type:text;uniqueIndex;not null"`
+	PasswordHash      string `gorm:"type:text;not null"`
+	UserMetadata      string `gorm:"type:text;not null;default:'{}'"`
+	IsAdmin           bool   `gorm:"not null;default:false;index"`
+	StorageQuotaBytes *int64
+	EmailConfirmedAt  *time.Time
+	LastSignInAt      *time.Time
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 type Session struct {

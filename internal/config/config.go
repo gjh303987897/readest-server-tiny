@@ -25,28 +25,30 @@ type SMTPConfig struct {
 }
 
 type Config struct {
-	Environment        string
-	Addr               string
-	PublicURL          string
-	AnonKey            string
-	JWTSecret          []byte
-	DatabaseDSN        string
-	StorageDir         string
-	AccessTokenTTL     time.Duration
-	RefreshTokenTTL    time.Duration
-	SignedURLTTL       time.Duration
-	StorageQuotaBytes  int64
-	MaxUploadBytes     int64
-	MaxJSONBodyBytes   int64
-	AutoConfirmEmail   bool
-	AllowedOrigins     []string
-	AllowedRedirects   []string
-	AuthRatePerMinute  int
-	APIRatePerMinute   int
-	ShutdownTimeout    time.Duration
-	HTTPIOTimeout      time.Duration
-	PasswordBCryptCost int
-	SMTP               SMTPConfig
+	Environment          string
+	Addr                 string
+	PublicURL            string
+	AnonKey              string
+	JWTSecret            []byte
+	DataDir              string
+	DatabaseDSN          string
+	StorageDir           string
+	InitialAdminEmail    string
+	InitialAdminPassword string
+	AccessTokenTTL       time.Duration
+	RefreshTokenTTL      time.Duration
+	SignedURLTTL         time.Duration
+	StorageQuotaBytes    int64
+	MaxUploadBytes       int64
+	MaxJSONBodyBytes     int64
+	AllowedOrigins       []string
+	AllowedRedirects     []string
+	AuthRatePerMinute    int
+	APIRatePerMinute     int
+	ShutdownTimeout      time.Duration
+	HTTPIOTimeout        time.Duration
+	PasswordBCryptCost   int
+	SMTP                 SMTPConfig
 }
 
 func Load() (Config, error) {
@@ -60,27 +62,29 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		Environment:        env("APP_ENV", "development"),
-		Addr:               env("ADDR", "127.0.0.1:8080"),
-		PublicURL:          strings.TrimRight(env("PUBLIC_URL", "http://127.0.0.1:8080"), "/"),
-		AnonKey:            env("PUBLIC_ANON_KEY", "readest-public-anon-key"),
-		JWTSecret:          secret,
-		DatabaseDSN:        env("DATABASE_DSN", filepath.Join(dataDir, "readest.db")),
-		StorageDir:         env("STORAGE_DIR", filepath.Join(dataDir, "objects")),
-		AccessTokenTTL:     envDuration("ACCESS_TOKEN_TTL", 15*time.Minute),
-		RefreshTokenTTL:    envDuration("REFRESH_TOKEN_TTL", 30*24*time.Hour),
-		SignedURLTTL:       envDuration("SIGNED_URL_TTL", 30*time.Minute),
-		StorageQuotaBytes:  envInt64("STORAGE_QUOTA_BYTES", 500*1024*1024),
-		MaxUploadBytes:     envInt64("MAX_UPLOAD_BYTES", 500*1024*1024),
-		MaxJSONBodyBytes:   envInt64("MAX_JSON_BODY_BYTES", 2*1024*1024),
-		AutoConfirmEmail:   envBool("AUTO_CONFIRM_EMAIL", true),
-		AllowedOrigins:     csvEnv("CORS_ALLOWED_ORIGINS", "*"),
-		AllowedRedirects:   csvEnv("ALLOWED_REDIRECT_URLS", "http://localhost:3000,readest://auth-callback"),
-		AuthRatePerMinute:  envInt("AUTH_RATE_LIMIT_PER_MINUTE", 30),
-		APIRatePerMinute:   envInt("API_RATE_LIMIT_PER_MINUTE", 300),
-		ShutdownTimeout:    envDuration("SHUTDOWN_TIMEOUT", 10*time.Second),
-		HTTPIOTimeout:      envDuration("HTTP_IO_TIMEOUT", 30*time.Minute),
-		PasswordBCryptCost: envInt("BCRYPT_COST", 12),
+		Environment:          env("APP_ENV", "development"),
+		Addr:                 env("ADDR", "127.0.0.1:8080"),
+		PublicURL:            strings.TrimRight(env("PUBLIC_URL", "http://127.0.0.1:8080"), "/"),
+		AnonKey:              env("PUBLIC_ANON_KEY", "readest-public-anon-key"),
+		JWTSecret:            secret,
+		DataDir:              dataDir,
+		DatabaseDSN:          env("DATABASE_DSN", filepath.Join(dataDir, "readest.db")),
+		StorageDir:           env("STORAGE_DIR", filepath.Join(dataDir, "objects")),
+		InitialAdminEmail:    strings.ToLower(strings.TrimSpace(env("INITIAL_ADMIN_EMAIL", "admin@readest.local"))),
+		InitialAdminPassword: os.Getenv("INITIAL_ADMIN_PASSWORD"),
+		AccessTokenTTL:       envDuration("ACCESS_TOKEN_TTL", 15*time.Minute),
+		RefreshTokenTTL:      envDuration("REFRESH_TOKEN_TTL", 30*24*time.Hour),
+		SignedURLTTL:         envDuration("SIGNED_URL_TTL", 30*time.Minute),
+		StorageQuotaBytes:    envInt64("STORAGE_QUOTA_BYTES", 500*1024*1024),
+		MaxUploadBytes:       envInt64("MAX_UPLOAD_BYTES", 500*1024*1024),
+		MaxJSONBodyBytes:     envInt64("MAX_JSON_BODY_BYTES", 2*1024*1024),
+		AllowedOrigins:       csvEnv("CORS_ALLOWED_ORIGINS", "*"),
+		AllowedRedirects:     csvEnv("ALLOWED_REDIRECT_URLS", "http://localhost:3000,readest://auth-callback"),
+		AuthRatePerMinute:    envInt("AUTH_RATE_LIMIT_PER_MINUTE", 30),
+		APIRatePerMinute:     envInt("API_RATE_LIMIT_PER_MINUTE", 300),
+		ShutdownTimeout:      envDuration("SHUTDOWN_TIMEOUT", 10*time.Second),
+		HTTPIOTimeout:        envDuration("HTTP_IO_TIMEOUT", 30*time.Minute),
+		PasswordBCryptCost:   envInt("BCRYPT_COST", 12),
 		SMTP: SMTPConfig{
 			Host:     os.Getenv("SMTP_HOST"),
 			Port:     envInt("SMTP_PORT", 587),
@@ -114,8 +118,14 @@ func (c Config) Validate() error {
 	if len(c.JWTSecret) < 32 {
 		return errors.New("JWT_SECRET must contain at least 32 bytes")
 	}
-	if len(c.AnonKey) < 8 || len(c.AnonKey) > 1024 || strings.ContainsAny(c.AnonKey, "\r\n\x00") || c.DatabaseDSN == "" || c.StorageDir == "" {
-		return errors.New("PUBLIC_ANON_KEY, DATABASE_DSN, and STORAGE_DIR are required")
+	if len(c.AnonKey) < 8 || len(c.AnonKey) > 1024 || strings.ContainsAny(c.AnonKey, "\r\n\x00") || c.DataDir == "" || c.DatabaseDSN == "" || c.StorageDir == "" {
+		return errors.New("PUBLIC_ANON_KEY, DATA_DIR, DATABASE_DSN, and STORAGE_DIR are required")
+	}
+	if !validBootstrapEmail(c.InitialAdminEmail) {
+		return errors.New("INITIAL_ADMIN_EMAIL must be a valid email address")
+	}
+	if c.InitialAdminPassword != "" && (len([]byte(c.InitialAdminPassword)) < 12 || len([]byte(c.InitialAdminPassword)) > 72 || strings.ContainsAny(c.InitialAdminPassword, "\r\n\x00")) {
+		return errors.New("INITIAL_ADMIN_PASSWORD must contain between 12 and 72 bytes")
 	}
 	if len(c.AllowedRedirects) == 0 || len(c.AllowedOrigins) == 0 {
 		return errors.New("at least one CORS origin and redirect URL are required")
@@ -164,10 +174,22 @@ func (c Config) Validate() error {
 	if c.SMTP.Port < 1 || c.SMTP.Port > 65535 {
 		return errors.New("SMTP_PORT must be between 1 and 65535")
 	}
-	if !c.AutoConfirmEmail && (c.SMTP.Host == "" || c.SMTP.From == "") {
-		return errors.New("SMTP_HOST and SMTP_FROM are required when AUTO_CONFIRM_EMAIL=false")
+	smtpConfigured := c.SMTP.Host != "" || c.SMTP.From != "" || c.SMTP.Username != "" || c.SMTP.Password != ""
+	if smtpConfigured && (c.SMTP.Host == "" || c.SMTP.From == "") {
+		return errors.New("SMTP_HOST and SMTP_FROM are required when SMTP is configured")
+	}
+	if c.SMTP.Password != "" && c.SMTP.Username == "" {
+		return errors.New("SMTP_USERNAME is required when SMTP_PASSWORD is configured")
 	}
 	return nil
+}
+
+func validBootstrapEmail(email string) bool {
+	if email == "" || len(email) > 320 || strings.Count(email, "@") != 1 || strings.ContainsAny(email, "\r\n\x00 ") {
+		return false
+	}
+	parts := strings.SplitN(email, "@", 2)
+	return parts[0] != "" && parts[1] != "" && strings.Contains(parts[1], ".")
 }
 
 func loadSecret(dataDir string) ([]byte, error) {
@@ -266,18 +288,6 @@ func envInt64(key string, fallback int64) int64 {
 		return fallback
 	}
 	return value
-}
-
-func envBool(key string, fallback bool) bool {
-	value := os.Getenv(key)
-	if value == "" {
-		return fallback
-	}
-	parsed, err := strconv.ParseBool(value)
-	if err != nil {
-		return fallback
-	}
-	return parsed
 }
 
 func csvEnv(key, fallback string) []string {

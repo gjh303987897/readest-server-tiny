@@ -19,84 +19,22 @@ import (
 )
 
 const (
-	minimumPasswordBytes = 8
+	minimumPasswordBytes = 12
 	maximumPasswordBytes = 72
 	maximumEmailBytes    = 320
 	maximumMetadataBytes = 32 * 1024
 )
 
 type authCredentials struct {
-	Email        string         `json:"email"`
-	Password     string         `json:"password"`
-	RefreshToken string         `json:"refresh_token"`
-	Data         map[string]any `json:"data"`
+	Email        string `json:"email"`
+	Password     string `json:"password"`
+	RefreshToken string `json:"refresh_token"`
 }
 
 type userUpdate struct {
 	Email    *string        `json:"email"`
 	Password *string        `json:"password"`
 	Data     map[string]any `json:"data"`
-}
-
-func (s *Server) signup(c *gin.Context) {
-	var request authCredentials
-	if err := bindJSON(c, s.cfg.MaxJSONBodyBytes, &request); err != nil {
-		authError(c, http.StatusBadRequest, "validation_failed", "Invalid signup request")
-		return
-	}
-	email, err := normalizeEmail(request.Email)
-	if err != nil || validatePassword(request.Password) != nil {
-		authError(c, http.StatusUnprocessableEntity, "weak_password", "Use a valid email and a password of at least 8 characters")
-		return
-	}
-	metadata, err := encodeMetadata(request.Data)
-	if err != nil {
-		authError(c, http.StatusUnprocessableEntity, "validation_failed", "User metadata is too large")
-		return
-	}
-	var existing int64
-	if err := s.db.Model(&model.User{}).Where("email = ?", email).Count(&existing).Error; err != nil {
-		logInternal("check signup email", err)
-		authError(c, http.StatusInternalServerError, "unexpected_failure", "Unable to create account")
-		return
-	}
-	if existing > 0 {
-		authError(c, http.StatusUnprocessableEntity, "user_already_exists", "A user with this email address has already been registered")
-		return
-	}
-	passwordHash, err := bcrypt.GenerateFromPassword([]byte(request.Password), s.cfg.PasswordBCryptCost)
-	if err != nil {
-		logInternal("hash signup password", err)
-		authError(c, http.StatusInternalServerError, "unexpected_failure", "Unable to create account")
-		return
-	}
-	now := time.Now().UTC()
-	user := model.User{
-		ID: uuid.NewString(), Email: email, PasswordHash: string(passwordHash), UserMetadata: metadata,
-	}
-	if s.cfg.AutoConfirmEmail {
-		user.EmailConfirmedAt = &now
-	}
-	if err := s.db.Create(&user).Error; err != nil {
-		logInternal("create user", err)
-		authError(c, http.StatusUnprocessableEntity, "user_already_exists", "Unable to create account")
-		return
-	}
-	if !s.cfg.AutoConfirmEmail {
-		redirect := s.safeRedirect(c.Query("redirect_to"))
-		if err := s.createAndSendAuthLink(&user, "signup", redirect); err != nil {
-			logInternal("send signup confirmation", err)
-		}
-		c.JSON(http.StatusOK, gin.H{"user": publicUser(&user)})
-		return
-	}
-	session, err := s.createSession(&user)
-	if err != nil {
-		logInternal("create signup session", err)
-		authError(c, http.StatusInternalServerError, "unexpected_failure", "Unable to create session")
-		return
-	}
-	c.JSON(http.StatusOK, session)
 }
 
 func (s *Server) token(c *gin.Context) {
@@ -205,7 +143,7 @@ func (s *Server) updateUser(c *gin.Context) {
 	updates := make(map[string]any)
 	if request.Password != nil {
 		if err := validatePassword(*request.Password); err != nil {
-			authError(c, http.StatusUnprocessableEntity, "weak_password", "Password must contain between 8 and 72 bytes")
+			authError(c, http.StatusUnprocessableEntity, "weak_password", "Password must contain between 12 and 72 bytes")
 			return
 		}
 		hash, err := bcrypt.GenerateFromPassword([]byte(*request.Password), s.cfg.PasswordBCryptCost)
@@ -264,6 +202,11 @@ func (s *Server) updateUser(c *gin.Context) {
 	if err := s.db.First(user, "id = ?", user.ID).Error; err != nil {
 		authError(c, http.StatusInternalServerError, "unexpected_failure", "Unable to load user")
 		return
+	}
+	if request.Password != nil && user.IsAdmin {
+		if err := removeInitialAdminCredentials(s.cfg.DataDir); err != nil {
+			logInternal("remove initial administrator credentials after password change", err)
+		}
 	}
 	c.JSON(http.StatusOK, publicUser(user))
 }
@@ -386,7 +329,9 @@ func (s *Server) sessionResponse(user *model.User, session *model.Session, refre
 	if err := s.db.Model(&model.File{}).Select("COALESCE(SUM(file_size), 0)").Where("user_id = ? AND ready = ?", user.ID, true).Scan(&usage).Error; err != nil {
 		return nil, err
 	}
-	accessToken, expiresAt, err := s.tokens.IssueAccess(s.publicURL, user.ID, user.Email, session.ID, usage, s.cfg.StorageQuotaBytes, s.cfg.AccessTokenTTL)
+	accessToken, expiresAt, err := s.tokens.IssueAccess(
+		s.publicURL, user.ID, user.Email, session.ID, usage, s.cfg.StorageQuotaBytes, s.quotaForUser(user), s.cfg.AccessTokenTTL,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -420,7 +365,7 @@ func publicUser(user *model.User) gin.H {
 	return gin.H{
 		"id": user.ID, "aud": "authenticated", "role": "authenticated", "email": user.Email,
 		"email_confirmed_at": emailConfirmed, "confirmed_at": emailConfirmed, "phone": "",
-		"last_sign_in_at": lastSignIn, "app_metadata": gin.H{"provider": "email", "providers": []string{"email"}},
+		"last_sign_in_at": lastSignIn, "app_metadata": gin.H{"provider": "email", "providers": []string{"email"}, "is_admin": user.IsAdmin},
 		"user_metadata": metadata, "identities": []any{identity}, "created_at": created, "updated_at": updated,
 		"is_anonymous": false,
 	}

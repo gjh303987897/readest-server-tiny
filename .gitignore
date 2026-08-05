@@ -20,5 +20,8 @@ coverage.*
 # Editors and operating systems
 /.idea/
 /.vscode/
+/web/admin/node_modules/
+/web/admin/.vite/
+/web/admin/*.tsbuildinfo
 .DS_Store
 Thumbs.db

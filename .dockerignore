@@ -1,0 +1,13 @@
+.git
+.gitignore
+.tmp-integration
+data
+readest-server
+readest-server.exe
+*.log
+*.test
+*.out
+coverage.*
+web/admin/node_modules
+web/admin/.vite
+web/admin/*.tsbuildinfo

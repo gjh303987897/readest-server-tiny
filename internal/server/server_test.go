@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -35,28 +36,30 @@ func newTestConfig(t *testing.T) config.Config {
 	t.Helper()
 	tmp := t.TempDir()
 	return config.Config{
-		Environment:        "test",
-		Addr:               "127.0.0.1:18081",
-		PublicURL:          "http://127.0.0.1",
-		HTTPIOTimeout:      time.Minute,
-		AnonKey:            "test-public-anon-key",
-		JWTSecret:          []byte("0123456789abcdef0123456789abcdef"),
-		DatabaseDSN:        fmt.Sprintf("file:%s?mode=memory&cache=shared&_foreign_keys=on", url.QueryEscape(t.Name())),
-		StorageDir:         filepath.Join(tmp, "objects"),
-		AccessTokenTTL:     15 * time.Minute,
-		RefreshTokenTTL:    24 * time.Hour,
-		SignedURLTTL:       5 * time.Minute,
-		StorageQuotaBytes:  10 << 20,
-		MaxUploadBytes:     10 << 20,
-		AutoConfirmEmail:   true,
-		AllowedOrigins:     []string{"*"},
-		AllowedRedirects:   []string{"http://localhost:3000", "readest://auth-callback"},
-		AuthRatePerMinute:  1000,
-		APIRatePerMinute:   1000,
-		ShutdownTimeout:    time.Second,
-		MaxJSONBodyBytes:   2 << 20,
-		PasswordBCryptCost: 4,
-		SMTP:               config.SMTPConfig{Port: 587},
+		Environment:          "test",
+		Addr:                 "127.0.0.1:18081",
+		PublicURL:            "http://127.0.0.1",
+		HTTPIOTimeout:        time.Minute,
+		AnonKey:              "test-public-anon-key",
+		JWTSecret:            []byte("0123456789abcdef0123456789abcdef"),
+		DataDir:              tmp,
+		DatabaseDSN:          fmt.Sprintf("file:%s?mode=memory&cache=shared&_foreign_keys=on", url.QueryEscape(t.Name())),
+		StorageDir:           filepath.Join(tmp, "objects"),
+		InitialAdminEmail:    "admin@example.com",
+		InitialAdminPassword: "correct horse battery staple",
+		AccessTokenTTL:       15 * time.Minute,
+		RefreshTokenTTL:      24 * time.Hour,
+		SignedURLTTL:         5 * time.Minute,
+		StorageQuotaBytes:    10 << 20,
+		MaxUploadBytes:       10 << 20,
+		AllowedOrigins:       []string{"*"},
+		AllowedRedirects:     []string{"http://localhost:3000", "readest://auth-callback"},
+		AuthRatePerMinute:    1000,
+		APIRatePerMinute:     1000,
+		ShutdownTimeout:      time.Second,
+		MaxJSONBodyBytes:     2 << 20,
+		PasswordBCryptCost:   4,
+		SMTP:                 config.SMTPConfig{Port: 587},
 	}
 }
 
@@ -117,18 +120,35 @@ func (a *testAPI) request(method, path string, body any, token string) (*http.Re
 
 func (a *testAPI) signup(email string) (access, refresh, userID string) {
 	a.t.Helper()
-	res, body := a.request(http.MethodPost, "/auth/v1/signup", map[string]any{
-		"email": email, "password": "correct horse battery staple", "data": map[string]any{"name": "Reader"},
+	adminAccess := a.tokens["admin"]
+	if adminAccess == "" {
+		res, login := a.request(http.MethodPost, "/auth/v1/token?grant_type=password", map[string]any{
+			"email": "admin@example.com", "password": "correct horse battery staple",
+		}, "")
+		adminAccess, _ = login["access_token"].(string)
+		if res.StatusCode != http.StatusOK || adminAccess == "" {
+			a.t.Fatalf("admin login: status %d: %#v", res.StatusCode, login)
+		}
+		a.tokens["admin"] = adminAccess
+	}
+	res, created := a.request(http.MethodPost, "/api/admin/users", map[string]any{
+		"email": email, "password": "correct horse battery staple", "name": "Reader",
+	}, adminAccess)
+	if res.StatusCode != http.StatusCreated {
+		a.t.Fatalf("admin create %s: status %d: %#v", email, res.StatusCode, created)
+	}
+	createdUser, _ := created["user"].(map[string]any)
+	userID, _ = createdUser["id"].(string)
+	res, body := a.request(http.MethodPost, "/auth/v1/token?grant_type=password", map[string]any{
+		"email": email, "password": "correct horse battery staple",
 	}, "")
 	if res.StatusCode != http.StatusOK {
-		a.t.Fatalf("signup %s: status %d: %#v", email, res.StatusCode, body)
+		a.t.Fatalf("login %s: status %d: %#v", email, res.StatusCode, body)
 	}
 	access, _ = body["access_token"].(string)
 	refresh, _ = body["refresh_token"].(string)
-	user, _ := body["user"].(map[string]any)
-	userID, _ = user["id"].(string)
 	if access == "" || refresh == "" || userID == "" {
-		a.t.Fatalf("incomplete signup response: %#v", body)
+		a.t.Fatalf("incomplete account response: %#v", body)
 	}
 	return access, refresh, userID
 }
@@ -139,6 +159,15 @@ func TestRuntimeConfigAndSupabaseAuthLifecycle(t *testing.T) {
 	res, runtime := a.request(http.MethodGet, "/runtime-config.js?format=json", nil, "")
 	if res.StatusCode != http.StatusOK || runtime["supabaseUrl"] != a.http.URL || runtime["apiBaseUrl"] != a.http.URL {
 		t.Fatalf("bad runtime config (%d): %#v", res.StatusCode, runtime)
+	}
+	res, _ = a.request(http.MethodGet, "/", nil, "")
+	adminHTML, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusOK || !bytes.Contains(adminHTML, []byte(`id="root"`)) || res.Header.Get("Content-Security-Policy") == "" {
+		t.Fatalf("administrator panel unavailable: %d %q", res.StatusCode, adminHTML)
+	}
+	res, _ = a.request(http.MethodGet, "/admin/assets/missing.js", nil, "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Fatalf("missing administrator asset served as SPA shell: %d", res.StatusCode)
 	}
 
 	access, refresh, _ := a.signup("Reader@Example.com")
@@ -198,37 +227,178 @@ func TestGlobalLogoutRevokesEveryUserSession(t *testing.T) {
 	}
 }
 
-func TestSMTPConfirmationAndPasswordRecovery(t *testing.T) {
+func TestPublicSignupDisabledAndAdminAccountManagement(t *testing.T) {
+	cfg := newTestConfig(t)
+	a := newTestAPIWithConfig(t, cfg)
+	res, body := a.request(http.MethodPost, "/auth/v1/signup", map[string]any{
+		"email": "blocked@example.com", "password": "correct horse battery staple",
+	}, "")
+	if res.StatusCode != http.StatusForbidden || body["error_code"] != "signup_disabled" {
+		t.Fatalf("public signup was not disabled: %d %#v", res.StatusCode, body)
+	}
+
+	adminAccess, _, _ := loginForTest(t, a, "admin@example.com", "correct horse battery staple")
+	res, session := a.request(http.MethodGet, "/api/admin/session", nil, adminAccess)
+	admin, _ := session["user"].(map[string]any)
+	if res.StatusCode != http.StatusOK || admin["isAdmin"] != true {
+		t.Fatalf("administrator session: %d %#v", res.StatusCode, session)
+	}
+
+	quota := int64(4)
+	res, created := a.request(http.MethodPost, "/api/admin/users", map[string]any{
+		"email": "managed@example.com", "password": "correct horse battery staple", "name": "Managed Reader", "quotaBytes": quota,
+	}, adminAccess)
+	createdUser, _ := created["user"].(map[string]any)
+	userID, _ := createdUser["id"].(string)
+	if res.StatusCode != http.StatusCreated || userID == "" || createdUser["quotaBytes"] != float64(quota) {
+		t.Fatalf("create managed account: %d %#v", res.StatusCode, created)
+	}
+	userAccess, _, _ := loginForTest(t, a, "managed@example.com", "correct horse battery staple")
+	res, _ = a.request(http.MethodGet, "/api/admin/users", nil, userAccess)
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("non-administrator accessed account management: %d", res.StatusCode)
+	}
+
+	hash := "dddddddddddddddddddddddddddddddd"
+	uploadRequest := map[string]any{
+		"fileName": "Readest/Books/" + hash + "/book.epub", "fileSize": 5, "bookHash": hash,
+	}
+	res, _ = a.request(http.MethodPost, "/api/storage/upload", uploadRequest, userAccess)
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("per-account quota was not enforced exactly: %d", res.StatusCode)
+	}
+	res, _ = a.request(http.MethodPatch, "/api/admin/users/"+userID+"/quota", map[string]any{}, adminAccess)
+	if res.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("missing quota update was accepted: %d", res.StatusCode)
+	}
+	res, updated := a.request(http.MethodPatch, "/api/admin/users/"+userID+"/quota", map[string]any{"quotaBytes": 10}, adminAccess)
+	updatedUser, _ := updated["user"].(map[string]any)
+	if res.StatusCode != http.StatusOK || updatedUser["quotaBytes"] != float64(10) {
+		t.Fatalf("update account quota: %d %#v", res.StatusCode, updated)
+	}
+	res, upload := a.request(http.MethodPost, "/api/storage/upload", uploadRequest, userAccess)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("upload within updated quota: %d %#v", res.StatusCode, upload)
+	}
+	put, err := http.NewRequest(http.MethodPut, upload["uploadUrl"].(string), strings.NewReader("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	put.Header.Set("Content-Length", "5")
+	putRes, err := a.http.Client().Do(put)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = putRes.Body.Close()
+	if putRes.StatusCode != http.StatusNoContent {
+		t.Fatalf("complete managed upload: %d", putRes.StatusCode)
+	}
+
+	res, listed := a.request(http.MethodGet, "/api/admin/users?search=managed%40example.com", nil, adminAccess)
+	users, _ := listed["users"].([]any)
+	if res.StatusCode != http.StatusOK || len(users) != 1 {
+		t.Fatalf("list managed account: %d %#v", res.StatusCode, listed)
+	}
+	row := users[0].(map[string]any)
+	if row["usageBytes"] != float64(5) || row["fileCount"] != float64(1) {
+		t.Fatalf("incorrect managed account usage: %#v", row)
+	}
+
+	res, _ = a.request(http.MethodDelete, "/api/admin/users/"+userID, nil, adminAccess)
+	if res.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete managed account: %d", res.StatusCode)
+	}
+	res, _ = a.request(http.MethodGet, "/auth/v1/user", nil, userAccess)
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("deleted account session remained valid: %d", res.StatusCode)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.StorageDir, userID)); !os.IsNotExist(err) {
+		t.Fatalf("deleted account storage remains: %v", err)
+	}
+	res, _ = a.request(http.MethodDelete, "/api/admin/users/"+admin["id"].(string), nil, adminAccess)
+	if res.StatusCode != http.StatusConflict {
+		t.Fatalf("administrator deleted itself: %d", res.StatusCode)
+	}
+}
+
+func TestInitialAdminCredentialsAreGeneratedOnce(t *testing.T) {
+	cfg := newTestConfig(t)
+	cfg.DatabaseDSN = filepath.Join(cfg.DataDir, "bootstrap.db")
+	cfg.InitialAdminPassword = ""
+
+	app, err := server.New(cfg)
+	if err != nil {
+		t.Fatalf("first server start: %v", err)
+	}
+	credentialPath := filepath.Join(cfg.DataDir, "initial-admin-credentials.json")
+	first, err := os.ReadFile(credentialPath)
+	if err != nil {
+		t.Fatalf("read generated administrator credentials: %v", err)
+	}
+	var credentials struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if json.Unmarshal(first, &credentials) != nil || credentials.Email != cfg.InitialAdminEmail || len(credentials.Password) < 24 {
+		t.Fatalf("invalid generated administrator credentials: %s", first)
+	}
+	if err := app.Close(); err != nil {
+		t.Fatalf("close first server: %v", err)
+	}
+
+	app, err = server.New(cfg)
+	if err != nil {
+		t.Fatalf("second server start: %v", err)
+	}
+	defer app.Close()
+	second, err := os.ReadFile(credentialPath)
+	if err != nil || !bytes.Equal(first, second) {
+		t.Fatal("initial administrator credentials changed on restart")
+	}
+	httpServer := httptest.NewServer(app.Handler())
+	defer httpServer.Close()
+	app.SetPublicURL(httpServer.URL)
+	a := &testAPI{t: t, http: httpServer, tokens: make(map[string]string)}
+	access, _, _ := loginForTest(t, a, credentials.Email, credentials.Password)
+	res, _ := a.request(http.MethodGet, "/api/admin/session", nil, access)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("generated administrator cannot log in: %d", res.StatusCode)
+	}
+	res, _ = a.request(http.MethodPut, "/auth/v1/user", map[string]any{
+		"password": "replacement administrator password",
+	}, access)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("change generated administrator password: %d", res.StatusCode)
+	}
+	if _, err := os.Stat(credentialPath); !os.IsNotExist(err) {
+		t.Fatalf("initial administrator credentials remain after password change: %v", err)
+	}
+}
+
+func loginForTest(t *testing.T, a *testAPI, email, password string) (access, refresh, userID string) {
+	t.Helper()
+	res, body := a.request(http.MethodPost, "/auth/v1/token?grant_type=password", map[string]any{
+		"email": email, "password": password,
+	}, "")
+	user, _ := body["user"].(map[string]any)
+	access, _ = body["access_token"].(string)
+	refresh, _ = body["refresh_token"].(string)
+	userID, _ = user["id"].(string)
+	if res.StatusCode != http.StatusOK || access == "" || refresh == "" || userID == "" {
+		t.Fatalf("login %s: %d %#v", email, res.StatusCode, body)
+	}
+	return access, refresh, userID
+}
+
+func TestSMTPPasswordRecovery(t *testing.T) {
 	host, port, messages := startTestSMTP(t)
 	cfg := newTestConfig(t)
-	cfg.AutoConfirmEmail = false
 	cfg.SMTP = config.SMTPConfig{
 		Host: host, Port: port, From: "Readest <noreply@example.com>",
 	}
 	a := newTestAPIWithConfig(t, cfg)
-	email := "confirm@example.com"
-	password := "correct horse battery staple"
-
-	res, signup := a.request(http.MethodPost, "/auth/v1/signup", map[string]any{
-		"email": email, "password": password,
-	}, "")
-	if res.StatusCode != http.StatusOK || signup["access_token"] != nil || signup["user"] == nil {
-		t.Fatalf("unconfirmed signup response: %d %#v", res.StatusCode, signup)
-	}
-	res, _ = a.request(http.MethodPost, "/auth/v1/token?grant_type=password", map[string]any{
-		"email": email, "password": password,
-	}, "")
-	if res.StatusCode != http.StatusBadRequest {
-		t.Fatalf("unconfirmed user logged in: %d", res.StatusCode)
-	}
-
-	confirmationLink := authLinkFromMessage(t, receiveMessage(t, messages))
-	access := followAuthLink(t, confirmationLink)
-	res, user := a.request(http.MethodGet, "/auth/v1/user", nil, access)
-	if res.StatusCode != http.StatusOK || user["email"] != email {
-		t.Fatalf("confirmed session unusable: %d %#v", res.StatusCode, user)
-	}
-	assertAuthLinkRejected(t, confirmationLink)
+	email := "recovery@example.com"
+	_, _, _ = a.signup(email)
 
 	res, recovery := a.request(http.MethodPost, "/auth/v1/recover?redirect_to="+url.QueryEscape("http://localhost:3000/auth/recovery"), map[string]any{
 		"email": email,

@@ -20,7 +20,6 @@ import (
 	"gorm.io/gorm"
 )
 
-const storageQuotaGraceBytes int64 = 10 * 1024 * 1024
 const maxFilesPerUser = 10000
 
 type uploadRequest struct {
@@ -58,6 +57,7 @@ func (s *Server) createUpload(c *gin.Context) {
 	expires := time.Now().UTC().Add(s.cfg.SignedURLTTL)
 	var file model.File
 	var reservedUsage int64
+	quota := s.quotaForUser(user)
 	err = s.db.Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
 		if err := tx.Where("user_id = ? AND ready = ? AND reservation_expires_at IS NOT NULL AND reservation_expires_at <= ?", user.ID, false, now).
@@ -92,7 +92,7 @@ func (s *Server) createUpload(c *gin.Context) {
 				FileKey: fileKey, FileName: request.FileName,
 			}
 		}
-		if reservedUsage > s.cfg.StorageQuotaBytes+storageQuotaGraceBytes {
+		if reservedUsage > quota {
 			return errQuotaExceeded
 		}
 		file.PendingSize = request.FileSize
@@ -126,7 +126,7 @@ func (s *Server) createUpload(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"uploadUrl": s.publicURL + "/api/storage/object?token=" + url.QueryEscape(signed),
-		"fileKey":   fileKey, "usage": reservedUsage, "quota": s.cfg.StorageQuotaBytes,
+		"fileKey":   fileKey, "usage": reservedUsage, "quota": quota,
 	})
 }
 
