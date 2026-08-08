@@ -68,12 +68,15 @@ CodeQL 分别分析 Go 与 JavaScript/TypeScript，Go 使用显式构建模式�
 
 ## 单次发布流程
 
-`release.yml` 只接受严格的稳定版本标签 `vMAJOR.MINOR.PATCH`。例如：
+`release.yml` 接受带可选 `v` 前缀的稳定版或预发布 SemVer 标签。例如：
 
 ```powershell
 git tag v1.0.0
 git push origin v1.0.0
 ```
+
+预发布版本可以使用 `0.0.1-alpha`、`v0.0.1-beta.1` 等标签。预发布流程会创建 GitHub
+Pre-release 和精确版本镜像标签，但不会更新稳定版的 `<major>.<minor>` 或 `latest` 标签。
 
 同一个 workflow run 会执行以下 Job：
 

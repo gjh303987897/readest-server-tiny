@@ -55,14 +55,23 @@ The base-image overrides are only needed when Docker Hub is unavailable; point t
 
 ## Releases
 
-Pushing a stable `vMAJOR.MINOR.PATCH` tag starts one release workflow that publishes a
+Pushing a semantic-version tag starts one release workflow that publishes a
 `linux/amd64` and `linux/arm64` image to GHCR, then creates a GitHub Release containing
 Linux amd64/arm64, Windows amd64, and macOS amd64/arm64 binaries plus SHA-256 checksums.
-Every binary includes the administrator panel and SQLite support.
+Every binary includes the administrator panel and SQLite support. Tags may optionally
+start with `v` and may include a prerelease suffix such as `0.0.1-alpha`.
 
 ```powershell
 git tag v1.0.0
 git push origin v1.0.0
+```
+
+Prerelease tags create a GitHub Pre-release and an exact-version image tag without
+moving the stable minor or `latest` tags:
+
+```powershell
+git tag 0.0.1-alpha
+git push origin 0.0.1-alpha
 ```
 
 Run the published multi-platform image through the existing Compose configuration by

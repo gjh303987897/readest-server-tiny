@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+      - "[0-9]*"
 
 permissions:
   contents: read
@@ -23,6 +24,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       version: ${{ steps.release.outputs.version }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
     steps:
       - name: Validate release tag
         id: release
@@ -30,11 +32,17 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Release tag must match vMAJOR.MINOR.PATCH; got: $RELEASE_TAG" >&2
+          if [[ ! "$RELEASE_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "Release tag must be a stable or prerelease semantic version; got: $RELEASE_TAG" >&2
             exit 1
           fi
-          echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+          VERSION="${RELEASE_TAG#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "$VERSION" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
 
   admin-ui:
     name: Build administrator UI
@@ -210,10 +218,12 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ steps.image.outputs.image }}
+          flavor: |
+            latest=false
           tags: |
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
+            type=semver,pattern={{major}}.{{minor}},enable=${{ needs.validate.outputs.prerelease == 'false' }}
+            type=raw,value=latest,enable=${{ needs.validate.outputs.prerelease == 'false' }}
           labels: |
             org.opencontainers.image.title=readest-tiny-backend
             org.opencontainers.image.description=Readest-compatible synchronization backend
@@ -268,6 +278,7 @@ jobs:
           DIGEST: ${{ needs.docker.outputs.digest }}
           RELEASE_TAG: ${{ github.ref_name }}
           VERSION: ${{ needs.validate.outputs.version }}
+          PRERELEASE: ${{ needs.validate.outputs.prerelease }}
         run: |
           RELEASE_NOTES=$(printf '%s\n' \
             '## Container image' \
@@ -276,11 +287,17 @@ jobs:
             "- Digest: \`$DIGEST\`" \
             '- Platforms: `linux/amd64`, `linux/arm64`')
 
+          RELEASE_FLAGS=()
+          if [[ "$PRERELEASE" == "true" ]]; then
+            RELEASE_FLAGS+=(--prerelease)
+          fi
+
           gh release create "$RELEASE_TAG" release-assets/* \
             --verify-tag \
             --title "readest-tiny-backend $VERSION" \
             --notes "$RELEASE_NOTES" \
-            --generate-notes
+            --generate-notes \
+            "${RELEASE_FLAGS[@]}"
 
       - name: Write release summary
         shell: bash
