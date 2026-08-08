@@ -53,6 +53,28 @@ docker compose exec readest-backend cat /app/data/initial-admin-credentials.json
 
 The base-image overrides are only needed when Docker Hub is unavailable; point them at a registry you trust. Compose also accepts `BIND_HOST`, `PORT`, and `READEST_IMAGE`. It persists state in the `readest-data` named volume so the non-root container keeps correct ownership. Include that volume in backups; `docker compose down` preserves it, while `docker compose down -v` deliberately deletes it.
 
+## Releases
+
+Pushing a stable `vMAJOR.MINOR.PATCH` tag starts one release workflow that publishes a
+`linux/amd64` and `linux/arm64` image to GHCR, then creates a GitHub Release containing
+Linux amd64/arm64, Windows amd64, and macOS amd64/arm64 binaries plus SHA-256 checksums.
+Every binary includes the administrator panel and SQLite support.
+
+```powershell
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Run the published multi-platform image through the existing Compose configuration by
+setting `READEST_IMAGE` to the immutable release version. Docker automatically selects
+the matching image architecture:
+
+```powershell
+$env:READEST_IMAGE = 'ghcr.io/gjh303987897/readest-server-tiny:1.0.0'
+docker compose pull
+docker compose up -d
+```
+
 ## Configuration
 
 Copy values from `.env.example` into your process environment or a local `.env` consumed by your process manager. The binary intentionally does not parse `.env` files itself.

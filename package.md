@@ -18,12 +18,12 @@
 | --- | --- | --- |
 | `ci.yml` | Pull Request、推送到 `main` | 校验 Go、管理面板和 Docker 镜像 |
 | `security.yml` | Pull Request、推送到 `main`、每周定时、手动 | 执行漏洞与静态安全扫描 |
-| `release.yml` | 推送 `v*` 标签 | 发布 amd64/arm64 镜像到 GHCR |
+| `release.yml` | 推送 `v*` 标签 | 在一次发布流程中生成镜像、各系统二进制和 GitHub Release |
 | `dependabot.yml` | 每周 | 检查 Go、npm 和 GitHub Actions 更新 |
 
 同一分支的旧 CI 或安全扫描会被取消，发布任务不会自动取消。所有工作流默认只授予
-`contents: read`；只有发布 Job 获得 `packages: write`，CodeQL Job 获得
-`security-events: write`。
+`contents: read`；镜像 Job 单独获得 `packages: write`，GitHub Release Job 单独获得
+`contents: write`，CodeQL Job 获得 `security-events: write`。
 
 ## 仓库配置
 
@@ -66,7 +66,7 @@ Security；确认方案和组织策略支持后，将仓库变量 `ENABLE_GHAS` 
 Dependency Review 仅分析 Pull Request 新增的依赖，并在引入高危或严重漏洞时失败。
 CodeQL 分别分析 Go 与 JavaScript/TypeScript，Go 使用显式构建模式以覆盖 CGO 代码。
 
-## 发布镜像
+## 单次发布流程
 
 `release.yml` 只接受严格的稳定版本标签 `vMAJOR.MINOR.PATCH`。例如：
 
@@ -74,6 +74,31 @@ CodeQL 分别分析 Go 与 JavaScript/TypeScript，Go 使用显式构建模式�
 git tag v1.0.0
 git push origin v1.0.0
 ```
+
+同一个 workflow run 会执行以下 Job：
+
+- `validate`：验证标签并提取版本号。
+- `admin-ui`：只构建一次管理面板，供所有系统二进制复用。
+- `binaries`：在对应架构的原生 GitHub runner 上并行构建 Linux、Windows 和 macOS。
+- `docker`：并行构建并推送 amd64/arm64 多架构镜像。
+- `release`：等待镜像和全部二进制成功，生成 SHA-256 校验文件并创建 GitHub Release。
+
+项目使用 CGO SQLite，因此二进制不通过简单设置 `GOOS`/`GOARCH` 交叉编译，而是在
+对应系统和架构的 runner 上原生构建。发布附件包括：
+
+```text
+readest-server_<version>_linux_amd64.tar.gz
+readest-server_<version>_linux_arm64.tar.gz
+readest-server_<version>_windows_amd64.zip
+readest-server_<version>_darwin_amd64.tar.gz
+readest-server_<version>_darwin_arm64.tar.gz
+checksums.txt
+```
+
+所有二进制都嵌入同一次构建生成的管理面板。任何二进制或镜像构建失败时，不会创建
+GitHub Release。
+
+## 发布镜像
 
 工作流会把 GitHub 仓库全名转换为小写，并发布到：
 
@@ -83,9 +108,10 @@ ghcr.io/<owner>/<repository>:1.0
 ghcr.io/<owner>/<repository>:latest
 ```
 
-构建目标为 `linux/amd64` 和 `linux/arm64`。项目使用 CGO SQLite，因此 arm64 构建通过
-QEMU 在目标架构环境中完成，没有把构建阶段强制固定为 `$BUILDPLATFORM`，从而避免缺少
-ARM64 C 交叉编译器导致链接失败。
+构建目标为 `linux/amd64` 和 `linux/arm64`，发布为同一个多架构 manifest。Docker 或
+Docker Compose 拉取镜像时会自动选择当前主机对应的镜像。项目使用 CGO SQLite，因此
+arm64 镜像构建通过 QEMU 在目标架构环境中完成，没有把构建阶段强制固定为
+`$BUILDPLATFORM`，从而避免缺少 ARM64 C 交叉编译器导致链接失败。
 
 发布镜像包含 OCI 元数据、最大模式的 BuildKit 来源证明和 SBOM。镜像推送成功后，
 Manifest 摘要会显示在 GitHub Actions Job Summary 中。所有第三方 Action 都固定到完整
