@@ -7,6 +7,7 @@ Implemented client contracts:
 - `GET /runtime-config.js` for Readest's custom server endpoint form
 - Supabase Auth-compatible email/password login, refresh, user update, logout, and password recovery under `/auth/v1`; public signup is disabled
 - `GET/POST /api/sync` for books, reading configs, bookmarks, and annotations, including deletion tombstones, server cursors, paged pulls, LWW conflict handling, and field-level cover/reading-status/metadata merges
+- `GET/PUT /api/privacy-sync` for per-account, end-to-end encrypted privacy settings with atomic last-write-wins conflict handling
 - `/api/storage/upload`, `/download`, `/list`, and `/delete`, backed by short-lived signed local upload/download URLs
 - `/admin/` for administrator-only account creation, deletion, usage statistics, and per-account storage quotas
 
@@ -108,6 +109,7 @@ Important production settings:
 - Account deletion revokes sessions, deletes synchronized rows, and removes the account's confined object directory.
 - Refresh tokens are random, stored only as SHA-256 hashes, rotated atomically, and rejected on replay.
 - Every GORM query for user data includes the authenticated user ID. Client-supplied `user_id` values are ignored.
+- Privacy PINs and hidden book hashes remain inside the client-encrypted envelope; the server validates and stores only the opaque ciphertext record.
 - Bookmark and annotation rows use the authenticated user plus `book_hash` and note `id` as their key; deleted records remain as tombstones so stale devices cannot recreate them.
 - Sync payloads, timestamps, JSON size, record counts, and text lengths are bounded.
 - HTTP body I/O and SMTP operations have deadlines; panic recovery never logs request headers or signed query strings.

@@ -106,6 +106,13 @@ type BookNote struct {
 	Payload string `gorm:"type:text;not null"`
 }
 
+type PrivacySetting struct {
+	UserID    string    `gorm:"type:text;primaryKey"`
+	Envelope  *string   `gorm:"type:text;check:privacy_settings_envelope_size,envelope IS NULL OR length(CAST(envelope AS blob)) <= 1048576"`
+	UpdatedAt time.Time `gorm:"autoCreateTime:false;autoUpdateTime:false"`
+	User      User      `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
+}
+
 type File struct {
 	ID                   string `gorm:"type:text;primaryKey"`
 	UserID               string `gorm:"type:text;not null;index"`

@@ -394,6 +394,7 @@ func (s *Server) deleteAdminUser(c *gin.Context) {
 		for _, result := range []*gorm.DB{
 			tx.Where("user_id = ?", userID).Delete(&model.Session{}),
 			tx.Where("user_id = ?", userID).Delete(&model.AuthToken{}),
+			tx.Where("user_id = ?", userID).Delete(&model.PrivacySetting{}),
 			tx.Where("user_id = ?", userID).Delete(&model.BookNote{}),
 			tx.Where("user_id = ?", userID).Delete(&model.BookConfig{}),
 			tx.Where("user_id = ?", userID).Delete(&model.Book{}),

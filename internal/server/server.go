@@ -78,7 +78,7 @@ func New(cfg config.Config) (*Server, error) {
 	}
 	if err := db.AutoMigrate(
 		&model.User{}, &model.Session{}, &model.AuthToken{}, &model.Book{},
-		&model.BookConfig{}, &model.BookNote{}, &model.File{},
+		&model.BookConfig{}, &model.BookNote{}, &model.PrivacySetting{}, &model.File{},
 	); err != nil {
 		return nil, fmt.Errorf("migrate database: %w", err)
 	}
@@ -172,6 +172,8 @@ func (s *Server) registerRoutes() {
 	api := s.engine.Group("/api", s.rateLimitMiddleware("api", s.cfg.APIRatePerMinute), s.authRequired())
 	api.GET("/sync", s.pullSync)
 	api.POST("/sync", s.pushSync)
+	api.GET("/privacy-sync", s.pullPrivacySettings)
+	api.PUT("/privacy-sync", s.pushPrivacySettings)
 	api.POST("/storage/upload", s.createUpload)
 	api.GET("/storage/download", s.createDownload)
 	api.POST("/storage/download", s.createDownload)
