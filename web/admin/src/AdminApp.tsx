@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   BookOutlined,
+  ArrowRightOutlined,
+  SafetyCertificateOutlined,
   CloudServerOutlined,
   DeleteOutlined,
   EditOutlined,
@@ -18,12 +20,15 @@ import {
   Alert,
   App,
   Avatar,
+  Breadcrumb,
   Button,
   Card,
   Col,
   Dropdown,
+  Drawer,
   Empty,
   Form,
+  Grid,
   Input,
   InputNumber,
   Layout,
@@ -44,6 +49,7 @@ import type { MenuProps, TableColumnsType } from 'antd';
 import { APIError, adminFetch, changePassword, getStoredSession, initializeAPI, login, logout, storeSession } from './api';
 import type { AdminUser, AuthSession, UsersResponse } from './types';
 import BackupPanel from './BackupPanel';
+import { AnimatedMetric, formatBytes } from './presentation';
 
 const { Header, Sider, Content } = Layout;
 const { Text, Title } = Typography;
@@ -52,14 +58,6 @@ type LoginFields = { email: string; password: string };
 type CreateFields = { email: string; password: string; name?: string; useDefaultQuota: boolean; quotaMiB?: number };
 type QuotaFields = { useDefaultQuota: boolean; quotaMiB?: number };
 type PasswordFields = { password: string; confirmPassword: string };
-
-const formatBytes = (bytes: number) => {
-  if (bytes === 0) return '0 B';
-  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
-  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  const value = bytes / 1024 ** index;
-  return `${value >= 100 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`;
-};
 
 const formatDate = (value: string | null) =>
   value ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '从未登录';
@@ -83,9 +81,18 @@ function LoginView({ onAuthenticated }: { onAuthenticated: (session: AuthSession
 
   return (
     <main className="login-shell">
+      <div className="login-art" aria-hidden="true">
+        <div className="art-caption"><span className="art-rule" /> YOUR READING SPACE</div>
+        <div className="book-scene"><div className="scene-orbit orbit-one" /><div className="scene-orbit orbit-two" /><div className="scene-shelf"><i className="spine spine-one" /><i className="spine spine-two" /><i className="spine spine-three" /><i className="spine spine-four" /><span className="shelf-line" /></div><span className="scene-caption">A place for every story.</span></div>
+        <div className="art-copy"><h1>让阅读，<br />拥有自己的空间。</h1><p>在这里，管理你的读者、书籍与每一份珍贵的数据。</p></div>
+        <div className="art-footer"><SafetyCertificateOutlined /> 自托管 · 自由掌控</div>
+      </div>
+      <div className="login-form-area">
       <section className="login-panel" aria-labelledby="login-title">
         <div className="login-brand"><span className="brand-mark"><BookOutlined /></span><span>Readest</span></div>
+        <div className="login-eyebrow">欢迎回来</div>
         <Title id="login-title" level={2}>管理员登录</Title>
+        <Text type="secondary" className="login-subtitle">登录控制台，照看你的阅读空间。</Text>
         <Form<LoginFields> layout="vertical" requiredMark={false} onFinish={submit} autoComplete="on">
           <Form.Item label="邮箱" name="email" rules={[{ required: true, type: 'email', message: '请输入有效邮箱' }]}>
             <Input prefix={<UserOutlined />} size="large" autoComplete="username" />
@@ -93,9 +100,12 @@ function LoginView({ onAuthenticated }: { onAuthenticated: (session: AuthSession
           <Form.Item label="密码" name="password" rules={[{ required: true, message: '请输入密码' }]}>
             <Input.Password prefix={<LockOutlined />} size="large" autoComplete="current-password" />
           </Form.Item>
-          <Button type="primary" htmlType="submit" size="large" block loading={loading}>登录</Button>
+          <Button type="primary" htmlType="submit" size="large" block loading={loading}>进入控制台 <ArrowRightOutlined /></Button>
         </Form>
+        <div className="login-note"><LockOutlined /> 仅限管理员访问</div>
       </section>
+      <div className="login-footer">Readest Tiny · 私有阅读空间</div>
+      </div>
     </main>
   );
 }
@@ -103,6 +113,9 @@ function LoginView({ onAuthenticated }: { onAuthenticated: (session: AuthSession
 function Dashboard({ session, onSignedOut }: { session: AuthSession; onSignedOut: () => void }) {
   const { message } = App.useApp();
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const screens = Grid.useBreakpoint();
+  const isMobile = screens.lg === false;
   const [section, setSection] = useState('users');
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<UsersResponse | null>(null);
@@ -241,7 +254,7 @@ function Dashboard({ session, onSignedOut }: { session: AuthSession; onSignedOut
     {
       title: '操作', key: 'actions', fixed: 'right', width: 106,
       render: (_, user) => <Space size={4}>
-        <Tooltip title="调整配额"><Button type="text" icon={<EditOutlined />} onClick={() => openQuota(user)} /></Tooltip>
+        <Tooltip title="调整配额"><Button type="text" aria-label="调整配额" icon={<EditOutlined />} onClick={() => openQuota(user)} /></Tooltip>
         {user.isAdmin ? (
           <Tooltip title="管理员账号不可删除"><Button type="text" danger disabled icon={<DeleteOutlined />} /></Tooltip>
         ) : (
@@ -267,31 +280,39 @@ function Dashboard({ session, onSignedOut }: { session: AuthSession; onSignedOut
     }
   };
 
+  const navigation = <>
+    <div className="sider-brand"><span className="brand-mark"><BookOutlined /></span><span className="brand-name">Readest<small>管理控制台</small></span></div>
+    <div className="nav-caption">工作空间</div>
+    <Menu theme="dark" mode="inline" selectedKeys={[section]} onClick={({ key }) => { setSection(key); setMobileOpen(false); }} items={[{ key: 'users', icon: <TeamOutlined />, label: '账号管理' }, { key: 'backup', icon: <CloudServerOutlined />, label: '备份与恢复' }]} />
+    <div className="sider-footer"><span className="sider-footer-icon"><SafetyCertificateOutlined /></span><div><strong>你的数据，由你掌控</strong><span>Readest Tiny · 自托管</span></div></div>
+  </>;
+
   return (
     <Layout className="admin-layout">
-      <Sider breakpoint="lg" collapsedWidth={0} width={216} collapsed={collapsed} onCollapse={setCollapsed} trigger={null} className="admin-sider">
-        <div className="sider-brand"><span className="brand-mark"><BookOutlined /></span><span>Readest</span></div>
-        <Menu theme="dark" mode="inline" selectedKeys={[section]} onClick={({ key }) => setSection(key)} items={[{ key: 'users', icon: <TeamOutlined />, label: '账号管理' }, { key: 'backup', icon: <CloudServerOutlined />, label: '备份与恢复' }]} />
-      </Sider>
-      <Layout>
+      <a className="skip-link" href="#main-content">跳到主要内容</a>
+      {!isMobile && <Sider collapsedWidth={80} width={240} collapsed={collapsed} trigger={null} className="admin-sider">{navigation}</Sider>}
+      <Drawer title="导航" open={isMobile && mobileOpen} onClose={() => setMobileOpen(false)} placement="left" size={260} className="mobile-navigation">{navigation}</Drawer>
+      <Layout className="main-layout">
         <Header className="admin-header">
-          <Button type="text" className="collapse-button" icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)} aria-label="切换导航" />
+          <div className="header-navigation"><Button type="text" className="collapse-button" icon={isMobile || collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => isMobile ? setMobileOpen(true) : setCollapsed(!collapsed)} aria-label="切换导航" aria-expanded={isMobile ? mobileOpen : !collapsed} /><Breadcrumb items={[{ title: '工作空间' }, { title: section === 'backup' ? '备份与恢复' : '账号管理' }]} /></div>
           <Dropdown menu={{ items: accountMenu, onClick: menuClick }} placement="bottomRight" trigger={['click']}>
-            <Button type="text" className="account-menu"><Avatar size="small" className="admin-avatar" icon={<UserOutlined />} /><span className="account-email">{session.user.email}</span></Button>
+            <Button type="text" className="account-menu" aria-label="管理员菜单"><Avatar size="small" className="admin-avatar" icon={<UserOutlined />} /><span className="account-email">{session.user.email}</span><span className="header-role">管理员</span></Button>
           </Dropdown>
         </Header>
-        <Content className="admin-content">
+        <Content className="admin-content" id="main-content" tabIndex={-1}>
+          <div key={section} className="page-view">
           {section === 'backup' ? <BackupPanel onSignedOut={onSignedOut} /> : <>
-          <div className="content-heading"><div><Title level={3}>账号管理</Title><Text type="secondary">{data?.total ?? 0} 个匹配账号</Text></div><Button type="primary" icon={<PlusOutlined />} onClick={() => { createForm.setFieldsValue({ useDefaultQuota: true }); setCreateOpen(true); }}>添加账号</Button></div>
+          <div className="content-heading"><div><span className="page-eyebrow">读者与权限</span><Title level={3}>照看每一位读者</Title><Text type="secondary">管理账号与存储配额，让阅读有序发生。</Text></div><Button type="primary" icon={<PlusOutlined />} onClick={() => { createForm.setFieldsValue({ useDefaultQuota: true }); setCreateOpen(true); }}>添加账号</Button></div>
           <Row gutter={[16, 16]} className="summary-row">
-            <Col xs={24} sm={8}><Card><div className="stat"><span className="stat-icon green"><TeamOutlined /></span><div><Text type="secondary">账号总数</Text><strong>{data?.summary.totalUsers.toLocaleString('zh-CN') ?? '0'}</strong></div></div></Card></Col>
-            <Col xs={24} sm={8}><Card><div className="stat"><span className="stat-icon amber"><CloudServerOutlined /></span><div><Text type="secondary">存储用量</Text><strong>{formatBytes(data?.summary.totalUsageBytes ?? 0)}</strong></div></div></Card></Col>
-            <Col xs={24} sm={8}><Card><div className="stat"><span className="stat-icon gray"><BookOutlined /></span><div><Text type="secondary">存储文件</Text><strong>{data?.summary.totalFiles.toLocaleString('zh-CN') ?? '0'}</strong></div></div></Card></Col>
+            <Col xs={8}><Card className="metric-card"><div className="stat"><span className="stat-icon green"><TeamOutlined /></span><div><Text type="secondary">账号总数</Text><AnimatedMetric value={data?.summary.totalUsers} /></div></div><span className="metric-caption">一起阅读的伙伴</span></Card></Col>
+            <Col xs={8}><Card className="metric-card"><div className="stat"><span className="stat-icon amber"><CloudServerOutlined /></span><div><Text type="secondary">存储用量</Text><AnimatedMetric value={data?.summary.totalUsageBytes} format={formatBytes} /></div></div><span className="metric-caption">已保存到此服务器</span></Card></Col>
+            <Col xs={8}><Card className="metric-card"><div className="stat"><span className="stat-icon gray"><BookOutlined /></span><div><Text type="secondary">存储文件</Text><AnimatedMetric value={data?.summary.totalFiles} /></div></div><span className="metric-caption">书籍与封面文件</span></Card></Col>
           </Row>
           <section className="table-section">
+            <div className="section-heading"><div><Title level={5}>全部账号 <span className="count-badge">{data?.total ?? '—'}</span></Title><Text type="secondary">查看账号用量，按需调整存储配额</Text></div><Tag icon={<LockOutlined />}>仅管理员可管理</Tag></div>
             <div className="table-toolbar">
-              <Input value={search} allowClear prefix={<SearchOutlined />} placeholder="搜索邮箱" onChange={(event) => setSearch(event.target.value)} onPressEnter={() => { setPage(1); setQuery(search.trim()); }} />
-              <Space><Button icon={<SearchOutlined />} onClick={() => { setPage(1); setQuery(search.trim()); }}>搜索</Button><Tooltip title="刷新"><Button icon={<ReloadOutlined />} onClick={() => loadUsers()} /></Tooltip></Space>
+              <Input value={search} aria-label="搜索邮箱" allowClear prefix={<SearchOutlined aria-hidden />} placeholder="搜索邮箱" onChange={(event) => setSearch(event.target.value)} onPressEnter={() => { setPage(1); setQuery(search.trim()); }} />
+              <Space><Button icon={<SearchOutlined aria-hidden />} onClick={() => { setPage(1); setQuery(search.trim()); }}>搜索</Button><Tooltip title="刷新"><Button aria-label="刷新账号列表" icon={<ReloadOutlined />} onClick={() => loadUsers()} /></Tooltip></Space>
             </div>
             <Table<AdminUser>
               rowKey="id" columns={columns} dataSource={data?.users ?? []} loading={loading}
@@ -300,6 +321,7 @@ function Dashboard({ session, onSignedOut }: { session: AuthSession; onSignedOut
             />
           </section>
           </>}
+          </div>
         </Content>
       </Layout>
 
