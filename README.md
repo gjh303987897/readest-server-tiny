@@ -1,5 +1,7 @@
 # Readest Tiny Backend
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 A self-hosted backend compatible with the current `readest-main` client. It is built with Go, Gin, GORM, SQLite, local object storage, and an embedded React + TypeScript + Ant Design administrator panel.
 
 Implemented client contracts:
