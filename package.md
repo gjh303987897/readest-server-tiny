@@ -9,6 +9,7 @@
 .github/
 |-- workflows/
 |   |-- ci.yml
+|   |-- docker-publish.yml
 |   |-- security.yml
 |   `-- release.yml
 `-- dependabot.yml
@@ -17,11 +18,12 @@
 | 文件 | 触发条件 | 作用 |
 | --- | --- | --- |
 | `ci.yml` | Pull Request、推送到 `main` | 校验 Go、管理面板和 Docker 镜像 |
+| `docker-publish.yml` | 推送到任意分支、手动运行 | 构建 amd64/arm64 镜像并推送到 GHCR |
 | `security.yml` | Pull Request、推送到 `main`、每周定时、手动 | 执行漏洞与静态安全扫描 |
 | `release.yml` | 推送 `v*` 标签 | 在一次发布流程中生成镜像、各系统二进制和 GitHub Release |
 | `dependabot.yml` | 每周 | 检查 Go、npm 和 GitHub Actions 更新 |
 
-同一分支的旧 CI 或安全扫描会被取消，发布任务不会自动取消。所有工作流默认只授予
+同一分支的旧 CI、安全扫描或分支镜像构建会被取消，版本发布任务不会自动取消。所有工作流默认只授予
 `contents: read`；镜像 Job 单独获得 `packages: write`，GitHub Release Job 单独获得
 `contents: write`，CodeQL Job 获得 `security-events: write`。
 
@@ -51,6 +53,19 @@ Repository Secret，不能写入源码、Dockerfile、Compose 或构建参数。
 
 Go 与 npm 缓存都以锁文件为键。Docker Buildx 使用 GitHub Actions 缓存，PR 构建无
 发布权限，来自 Fork 的代码无法借此推送镜像。
+
+## 分支镜像自动发布
+
+`docker-publish.yml` 在任意分支 push 后自动构建并推送多架构镜像，也支持手动运行。
+删除分支不会执行镜像构建。同一分支的新运行会取消旧运行，优先发布最新提交。
+
+镜像地址为 `ghcr.io/<owner>/<repository>`，仓库全名会转换为小写。每次成功构建生成
+`branch-<branch>` 和 `sha-<完整提交哈希>` 标签；默认分支还会更新 `edge`。版本标签
+继续由 `release.yml` 处理，稳定版 `latest` 不受分支构建影响。
+
+构建使用 QEMU 和 Buildx，目标为 `linux/amd64`、`linux/arm64`，按分支标签隔离构建
+缓存，并生成 OCI 元数据、来源证明和 SBOM。认证使用自带的 `GITHUB_TOKEN`，只在
+镜像 Job 中授予 `packages: write`，无需额外 PAT。发布结果和摘要会写入 Job Summary。
 
 ## 安全检查
 

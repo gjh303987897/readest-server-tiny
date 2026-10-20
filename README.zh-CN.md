@@ -61,6 +61,24 @@ docker compose exec readest-backend cat /app/data/initial-admin-credentials.json
 
 仅在无法访问 Docker Hub 时才需要覆盖基础镜像地址，请使用可信的镜像仓库。Compose 还支持 `BIND_HOST`、`PORT` 和 `READEST_IMAGE`。数据保存在名为 `readest-data` 的卷中，以保证非 root 容器的文件所有权正确。请将该卷纳入备份；`docker compose down` 会保留数据，而 `docker compose down -v` 会主动删除数据卷。
 
+## 自动发布 Docker 镜像
+
+向任意分支 push 都会触发 [Publish Docker image](.github/workflows/docker-publish.yml)，自动构建 `linux/amd64` 和 `linux/arm64` 镜像并推送到 `ghcr.io/<owner>/<repository>`。工作流使用仓库自带的 `GITHUB_TOKEN` 和 `packages: write` 权限，无需额外配置镜像仓库密钥，也支持在 GitHub Actions 页面手动运行。
+
+- `branch-<分支名>`：跟随对应分支，`/` 等不受镜像标签支持的字符会替换为 `-`。
+- `sha-<完整提交哈希>`：标识镜像对应的源码提交。
+- `edge`：跟随默认分支。稳定版 `latest` 和版本标签仍由下方的版本发布流程维护。
+
+同一分支的新 push 会取消尚未完成的旧镜像构建。首次发布后，请在 GitHub Packages 设置中确认镜像的可见性及仓库访问权限。认证和权限机制可参考 [GitHub 容器镜像发布指南](https://docs.github.com/en/actions/tutorials/publish-packages/publish-docker-images)。
+
+通过 Compose 运行默认分支镜像：
+
+```powershell
+$env:READEST_IMAGE = 'ghcr.io/gjh303987897/readest-server-tiny:edge'
+docker compose pull
+docker compose up -d
+```
+
 ## 版本发布
 
 推送语义化版本标签会触发统一的发布工作流：先向 GHCR 发布支持 `linux/amd64` 和 `linux/arm64` 的镜像，再创建 GitHub Release，提供 Linux amd64/arm64、Windows amd64、macOS amd64/arm64 二进制文件及 SHA-256 校验和。每个二进制文件均包含管理员面板和 SQLite 支持。标签可以使用 `v` 前缀，也可以包含预发布后缀，例如 `0.0.1-alpha`。

@@ -60,6 +60,24 @@ docker compose exec readest-backend cat /app/data/initial-admin-credentials.json
 
 The base-image overrides are only needed when Docker Hub is unavailable; point them at a registry you trust. Compose also accepts `BIND_HOST`, `PORT`, and `READEST_IMAGE`. It persists state in the `readest-data` named volume so the non-root container keeps correct ownership. Include that volume in backups; `docker compose down` preserves it, while `docker compose down -v` deliberately deletes it.
 
+## Automatic Docker Publishing
+
+Every push to any branch triggers [Publish Docker image](.github/workflows/docker-publish.yml), which builds `linux/amd64` and `linux/arm64` images and pushes them to `ghcr.io/<owner>/<repository>`. It uses the repository's `GITHUB_TOKEN` with `packages: write`; no additional registry secret is needed. The workflow can also be run manually from GitHub Actions.
+
+- `branch-<branch>` tracks that branch; unsupported tag characters such as `/` are replaced with `-`.
+- `sha-<full-commit-sha>` identifies the source commit.
+- `edge` tracks the default branch. Stable `latest` and version tags remain managed by the release workflow below.
+
+New pushes to the same branch cancel older in-progress image builds. After the first publication, check the package visibility and its repository access in GitHub Packages settings. See [GitHub's container publishing guide](https://docs.github.com/en/actions/tutorials/publish-packages/publish-docker-images) for the authentication and permission model.
+
+To run the default branch image with Compose:
+
+```powershell
+$env:READEST_IMAGE = 'ghcr.io/gjh303987897/readest-server-tiny:edge'
+docker compose pull
+docker compose up -d
+```
+
 ## Releases
 
 Pushing a semantic-version tag starts one release workflow that publishes a
