@@ -11,6 +11,10 @@ Implemented client contracts:
 - `/api/storage/upload`, `/download`, `/list`, and `/delete`, backed by short-lived signed local upload/download URLs
 - `/admin/` for administrator-only account creation, deletion, usage statistics, and per-account storage quotas
 
+Runtime config advertises `objectStorageType: "r2"` for the client's object-key naming strategy; objects are still stored locally. It also advertises disabled public signup, immediate email changes, and sync request limits. Updated clients persist these settings when connecting to this server. After upgrading an existing client, reconnect the server endpoint once to load the additional settings.
+
+Book pull cursors round-trip at millisecond precision and advance monotonically per account, including progress updates. Legacy sub-millisecond rows are returned with rounded-up cursors and completed boundary groups. Clients should send the returned cursor unchanged for the next exclusive pull, and split pushes by both the advertised record count and UTF-8 body-size limits.
+
 ## Quick Start
 
 Go 1.25 and a C compiler are required because the official GORM SQLite driver uses CGO. Node.js 24 is required only when rebuilding the administrator panel. Older Go installations with automatic toolchain selection enabled can download the required toolchain through `GOPROXY`.

@@ -283,8 +283,10 @@ func (s *Server) pushSync(c *gin.Context) {
 	var authoritativeConfigs []model.BookConfig
 	var authoritativeNotes []model.BookNote
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		batchTime := time.Now().UTC()
-		var err error
+		batchTime, err := nextBookSyncTime(tx, user.ID, time.Now().UTC())
+		if err != nil {
+			return err
+		}
 		authoritativeBooks, err = mergeBooks(tx, bookRows, batchTime)
 		if err != nil {
 			return err
@@ -319,6 +321,29 @@ func (s *Server) pushSync(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"books": books, "configs": configs, "notes": notes})
 }
 
+// Book cursors must round-trip through JavaScript Date. Round legacy timestamps
+// up, and put new commits strictly after the last cursor issued for this user.
+func bookCursorTime(value time.Time) time.Time {
+	result := value.Truncate(time.Millisecond)
+	if result.Before(value) {
+		result = result.Add(time.Millisecond)
+	}
+	return result
+}
+
+func nextBookSyncTime(tx *gorm.DB, userID string, now time.Time) (time.Time, error) {
+	var latest model.Book
+	err := tx.Select("synced_at").Where("user_id = ?", userID).Order("synced_at DESC").Take(&latest).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return time.Time{}, err
+	}
+	stamp := now.Truncate(time.Millisecond)
+	if !stamp.After(bookCursorTime(latest.SyncedAt)) {
+		stamp = bookCursorTime(latest.SyncedAt).Add(time.Millisecond)
+	}
+	return stamp, nil
+}
+
 func (s *Server) queryBooks(userID string, since time.Time, bookFilter, metaFilter string, limit int, paged bool) ([]any, error) {
 	query := s.db.Where("user_id = ? AND synced_at > ?", userID, since)
 	query = applyBookFilters(query, bookFilter, metaFilter)
@@ -328,9 +353,9 @@ func (s *Server) queryBooks(userID string, since time.Time, bookFilter, metaFilt
 			return nil, err
 		}
 		if len(page) == limit {
-			last := page[len(page)-1].SyncedAt
+			last := bookCursorTime(page[len(page)-1].SyncedAt)
 			var ties []model.Book
-			tieQuery := s.db.Where("user_id = ? AND synced_at = ?", userID, last)
+			tieQuery := s.db.Where("user_id = ? AND synced_at > ? AND synced_at <= ?", userID, last.Add(-time.Millisecond), last)
 			tieQuery = applyBookFilters(tieQuery, bookFilter, metaFilter)
 			if err := tieQuery.Find(&ties).Error; err != nil {
 				return nil, err
@@ -860,7 +885,7 @@ func bookResponse(book *model.Book) gin.H {
 		"cover_updated_at": nullableTime(book.CoverUpdatedAt), "metadata_updated_at": nullableTime(book.MetadataUpdatedAt),
 		"group_id": valueOrNil(book.GroupID), "group_name": valueOrNil(book.GroupName), "metadata": valueOrNil(book.Metadata),
 		"created_at": nullableTime(book.CreatedAt), "updated_at": nullableTime(book.UpdatedAt), "deleted_at": nullableTime(book.DeletedAt),
-		"uploaded_at": nullableTime(book.UploadedAt), "synced_at": formatTime(book.SyncedAt),
+		"uploaded_at": nullableTime(book.UploadedAt), "synced_at": formatTime(bookCursorTime(book.SyncedAt)),
 	}
 }
 

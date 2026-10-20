@@ -196,8 +196,10 @@ func (s *Server) registerRoutes() {
 func (s *Server) runtimeConfig(c *gin.Context) {
 	configBody := gin.H{
 		"supabaseUrl": s.publicURL, "supabaseAnonKey": s.cfg.AnonKey,
-		"apiBaseUrl": s.publicURL, "objectStorageType": "local",
+		"apiBaseUrl": s.publicURL, "objectStorageType": "r2",
 		"storageFixedQuota": s.cfg.StorageQuotaBytes,
+		"signupEnabled":     false, "emailChangeRequiresConfirmation": false,
+		"syncMaxRecords": maxSyncRecords, "syncMaxBodyBytes": s.cfg.MaxJSONBodyBytes,
 	}
 	if c.Query("format") == "json" {
 		c.JSON(http.StatusOK, configBody)
@@ -278,7 +280,7 @@ func (s *Server) corsMiddleware() gin.HandlerFunc {
 				c.Header("Vary", "Origin")
 			}
 		}
-		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, apikey, x-client-info")
+		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, apikey, x-client-info, X-Supabase-Api-Version")
 		c.Header("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS")
 		c.Header("Access-Control-Expose-Headers", "Content-Length, X-Content-Length, Content-Disposition")
 		if c.Request.Method == http.MethodOptions {
@@ -367,7 +369,11 @@ func isStoredObjectName(name string) bool {
 }
 
 func authError(c *gin.Context, status int, code, message string) {
-	c.JSON(status, gin.H{"code": status, "error_code": code, "msg": message, "message": message})
+	body := gin.H{"code": status, "error_code": code, "msg": message, "message": message}
+	if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+		body["error"] = "Not authenticated"
+	}
+	c.JSON(status, body)
 }
 
 func jsonError(c *gin.Context, status int, message string) {
