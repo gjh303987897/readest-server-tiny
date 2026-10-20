@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/subtle"
 	"errors"
 	"fmt"
@@ -28,14 +29,20 @@ import (
 const userContextKey = "authenticated-user"
 
 type Server struct {
-	cfg       config.Config
-	db        *gorm.DB
-	engine    *gin.Engine
-	tokens    *security.Manager
-	publicURL string
-	limiter   *fixedWindowLimiter
-	storage   *os.Root
-	adminUI   fs.FS
+	cfg           config.Config
+	db            *gorm.DB
+	engine        *gin.Engine
+	tokens        *security.Manager
+	publicURL     string
+	limiter       *fixedWindowLimiter
+	storage       *os.Root
+	adminUI       fs.FS
+	dataMu        sync.RWMutex
+	backupMu      sync.Mutex
+	backupJob     *backupJob
+	backupContext context.Context
+	backupCancel  context.CancelFunc
+	backupWG      sync.WaitGroup
 }
 
 func New(cfg config.Config) (*Server, error) {
@@ -107,6 +114,7 @@ func New(cfg config.Config) (*Server, error) {
 		cfg: cfg, db: db, engine: engine, tokens: security.NewManager(cfg.JWTSecret),
 		publicURL: cfg.PublicURL, limiter: newFixedWindowLimiter(), storage: storageRoot, adminUI: adminFiles,
 	}
+	s.backupContext, s.backupCancel = context.WithCancel(context.Background())
 	s.registerMiddleware()
 	s.registerRoutes()
 	closeDB = false
@@ -116,6 +124,12 @@ func New(cfg config.Config) (*Server, error) {
 func (s *Server) Handler() http.Handler { return s.engine }
 
 func (s *Server) Close() error {
+	s.backupMu.Lock()
+	s.backupCancel()
+	s.backupMu.Unlock()
+	s.backupWG.Wait()
+	s.dataMu.Lock()
+	defer s.dataMu.Unlock()
 	sqlDB, err := s.db.DB()
 	if err != nil {
 		return err
@@ -147,6 +161,13 @@ func (s *Server) registerMiddleware() {
 		c.Next()
 	})
 	s.engine.Use(s.corsMiddleware())
+	s.engine.Use(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/api/") || strings.HasPrefix(c.Request.URL.Path, "/auth/") {
+			s.dataMu.RLock()
+			defer s.dataMu.RUnlock()
+		}
+		c.Next()
+	})
 }
 
 func (s *Server) registerRoutes() {
@@ -186,6 +207,13 @@ func (s *Server) registerRoutes() {
 	admin.POST("/users", s.createAdminUser)
 	admin.PATCH("/users/:id/quota", s.updateAdminUserQuota)
 	admin.DELETE("/users/:id", s.deleteAdminUser)
+	admin.GET("/backup/config", s.getBackupConfig)
+	admin.PUT("/backup/config", s.putBackupConfig)
+	admin.POST("/backup/test", s.testBackupDestination)
+	admin.GET("/backup/files", s.listBackups)
+	admin.GET("/backup/status", s.backupStatus)
+	admin.POST("/backup/create", s.createBackup)
+	admin.POST("/backup/restore", s.restoreBackup)
 
 	objects := s.engine.Group("/api/storage/object", s.rateLimitMiddleware("storage-object", s.cfg.APIRatePerMinute))
 	objects.PUT("", s.uploadObject)

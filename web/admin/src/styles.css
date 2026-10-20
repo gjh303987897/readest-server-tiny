@@ -104,3 +104,8 @@ button, input { letter-spacing: 0; }
   .table-toolbar > .ant-input-affix-wrapper { width: 100%; }
   .table-toolbar > .ant-space { justify-content: flex-end; }
 }
+.backup-panel { display: grid; gap: 20px; }
+.backup-panel .content-heading { margin-bottom: 0; }
+.backup-panel .ant-form { max-width: 720px; }
+.backup-provider { margin-bottom: 24px; }
+.backup-credentials { margin-top: 20px; }

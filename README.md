@@ -12,6 +12,7 @@ Implemented client contracts:
 - `GET/PUT /api/privacy-sync` for per-account, end-to-end encrypted privacy settings with atomic last-write-wins conflict handling
 - `/api/storage/upload`, `/download`, `/list`, and `/delete`, backed by short-lived signed local upload/download URLs
 - `/admin/` for administrator-only account creation, deletion, usage statistics, and per-account storage quotas
+- Full-server encrypted backups to WebDAV or S3-compatible storage, with administrator-only restore from the embedded panel
 
 Runtime config advertises `objectStorageType: "r2"` for the client's object-key naming strategy; objects are still stored locally. It also advertises disabled public signup, immediate email changes, and sync request limits. Updated clients persist these settings when connecting to this server. After upgrading an existing client, reconnect the server endpoint once to load the additional settings.
 
@@ -125,6 +126,41 @@ Important production settings:
 
 `PUBLIC_ANON_KEY` is deliberately public because Readest receives it from runtime config. It is only an API identifier; authorization always comes from signed, revocable Bearer sessions.
 
+## WebDAV / S3 Backup and Restore
+
+Open **备份与恢复** (Backup and Restore) in `/admin/`:
+
+1. Choose WebDAV or S3, fill in the destination, and save the configuration. Each provider has its own saved destination. For AWS S3, leave Endpoint empty; for MinIO and other compatible services, enter the endpoint and enable Path Style as appropriate.
+2. Test the saved connection and click **立即备份** (Back Up Now). Set an independent backup passphrase of at least 12 bytes and keep it securely; the server does not store it. The encrypted `readest-<UTC timestamp>-<UUID>.tar.gz.age` file is uploaded to the configured prefix.
+3. To restore, load the backup list, choose a file, enter its backup passphrase and the **current** administrator login password, and type `RESTORE`. This replaces the entire server's application data. You must know an administrator login from the backup to log in afterwards.
+
+The archive contains all accounts (including password hashes, administrator flags and quotas), book metadata, reading configurations, notes, privacy ciphertext, and all completed referenced object files. Active sessions, recovery tokens, and unfinished uploads are excluded. Deployment settings, JWT keys, SMTP credentials, and remote backup credentials remain those of the current deployment and are excluded from archives. Restore requires the same database schema; use the same server version when migrating to a new installation, configure its destination, then restore.
+
+Archives use age passphrase encryption (scrypt + authenticated encryption), gzip, and a SHA-256 file manifest. A missing passphrase cannot be recovered. Backup passphrases are independent of Readest's privacy PIN; restoring privacy ciphertext still requires the original PIN in the client. Scrypt temporarily uses approximately 256 MiB of memory.
+
+Snapshot creation and the final restore step pause application data requests to keep SQLite and object files consistent. Remote transfer and staging validation run in the background; only one backup/restore job can run at a time. Tasks are manual, stop when the process stops, and are not automatically retried. The latest task status is kept in memory until restart. Keep a single backend process per database/object store.
+
+Before changing live data, restore verifies decryption, file hashes, SQLite integrity, schema, references and the presence of an administrator. It also saves an encrypted safety backup under `DATA_DIR/backups/before-restore/`, using the **same passphrase entered for that restore**. The task status reports its relative path. This backup is retained locally; move it to the configured remote prefix with its original filename if you need to restore it through the panel. There is no automatic retention cleanup. Failed validation leaves current data unchanged. Successful restore invalidates all login sessions and previously signed object URLs. Log in again and reload the full library on clients; cached local changes may otherwise sync back to the restored server.
+
+Destination credentials are encrypted in `DATA_DIR/backup-config.enc` with a key derived from the deployment's JWT secret. API responses mask stored passwords; leaving a secret blank when saving preserves its existing value. Keep `jwt-secret` / `JWT_SECRET` stable to read this configuration. If the key is lost, remove the configuration file and re-enter the destination credentials; archives can still be decrypted with their backup passphrase.
+
+WebDAV needs `PROPFIND`, `MKCOL`, `PUT`, `MOVE`, `GET` and temporary-file `DELETE` permissions; uploads use a temporary name followed by `MOVE` so partial files do not appear in the list. S3 needs bucket listing and object read/write permissions, plus permission to abort multipart uploads. Use HTTPS for remote services. The connection test checks listing only; write permissions are verified when uploading.
+
+`BACKUP_MAX_BYTES` defaults to 50 GiB and caps both encrypted downloads/uploads and the total uncompressed database/object size. `BACKUP_TIMEOUT` defaults to `2h`. Up to 99,999 completed objects can be backed up. Staging uses `STORAGE_DIR/.backup-work-*`; reserve space for the snapshot, encrypted archive, extracted data, and safety backup in addition to current data. Temporary files are cleaned after tasks; after an abrupt process termination, remove abandoned `.backup-work-*` directories only while the server is stopped.
+
+All endpoints below require an administrator Bearer session:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET / PUT | `/api/admin/backup/config` | Read masked configurations / save one destination |
+| POST | `/api/admin/backup/test` | Test saved destination: `{ "provider": "webdav" }` |
+| GET | `/api/admin/backup/files?provider=webdav` | List encrypted backups (`provider=s3` also supported) |
+| GET | `/api/admin/backup/status` | Latest job, phase, result and safety backup path |
+| POST | `/api/admin/backup/create` | Start a job with `provider` and `passphrase`; returns HTTP 202 |
+| POST | `/api/admin/backup/restore` | Start a restore with `provider`, `name`, `passphrase`, `adminPassword`, `confirmation: "RESTORE"`; returns HTTP 202 |
+
+Configuration fields are `provider`, `endpoint`, `prefix`; WebDAV also accepts `username` and `password`, while S3 accepts `region`, `bucket`, `accessKeyId`, `secretAccessKey`, and `pathStyle`. The restore status API requires a fresh login after sessions have been invalidated.
+
 ## Security Model
 
 - Passwords use bcrypt; access tokens are short-lived HS256 JWTs and are checked against revocable server sessions.
@@ -162,3 +198,5 @@ go run github.com/securego/gosec/v2/cmd/gosec@v2.28.0 -quiet ./...
 ```
 
 Tests cover administrator bootstrap, disabled signup, administrator authorization, account creation/deletion, exact per-account quota enforcement, usage statistics, the Supabase-compatible session lifecycle, token replay and revocation, dangerous configuration rejection, tenant isolation, book/config/note merge and cursor behavior, bookmark tombstones, legacy note-schema migration, path traversal rejection, signed upload size/replay enforcement, and cross-account storage access.
+
+Backup tests additionally exercise local WebDAV and S3 fixtures, encrypted credential storage, full-server restore, session and signed-URL invalidation, wrong passwords, authenticated-stream truncation, tampering, unsafe archive paths, symlinks, duplicate entries, and extraction limits.

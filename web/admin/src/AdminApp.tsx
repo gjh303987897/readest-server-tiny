@@ -43,6 +43,7 @@ import {
 import type { MenuProps, TableColumnsType } from 'antd';
 import { APIError, adminFetch, changePassword, getStoredSession, initializeAPI, login, logout, storeSession } from './api';
 import type { AdminUser, AuthSession, UsersResponse } from './types';
+import BackupPanel from './BackupPanel';
 
 const { Header, Sider, Content } = Layout;
 const { Text, Title } = Typography;
@@ -102,6 +103,7 @@ function LoginView({ onAuthenticated }: { onAuthenticated: (session: AuthSession
 function Dashboard({ session, onSignedOut }: { session: AuthSession; onSignedOut: () => void }) {
   const { message } = App.useApp();
   const [collapsed, setCollapsed] = useState(false);
+  const [section, setSection] = useState('users');
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<UsersResponse | null>(null);
   const [page, setPage] = useState(1);
@@ -269,7 +271,7 @@ function Dashboard({ session, onSignedOut }: { session: AuthSession; onSignedOut
     <Layout className="admin-layout">
       <Sider breakpoint="lg" collapsedWidth={0} width={216} collapsed={collapsed} onCollapse={setCollapsed} trigger={null} className="admin-sider">
         <div className="sider-brand"><span className="brand-mark"><BookOutlined /></span><span>Readest</span></div>
-        <Menu theme="dark" mode="inline" selectedKeys={['users']} items={[{ key: 'users', icon: <TeamOutlined />, label: '账号管理' }]} />
+        <Menu theme="dark" mode="inline" selectedKeys={[section]} onClick={({ key }) => setSection(key)} items={[{ key: 'users', icon: <TeamOutlined />, label: '账号管理' }, { key: 'backup', icon: <CloudServerOutlined />, label: '备份与恢复' }]} />
       </Sider>
       <Layout>
         <Header className="admin-header">
@@ -279,6 +281,7 @@ function Dashboard({ session, onSignedOut }: { session: AuthSession; onSignedOut
           </Dropdown>
         </Header>
         <Content className="admin-content">
+          {section === 'backup' ? <BackupPanel onSignedOut={onSignedOut} /> : <>
           <div className="content-heading"><div><Title level={3}>账号管理</Title><Text type="secondary">{data?.total ?? 0} 个匹配账号</Text></div><Button type="primary" icon={<PlusOutlined />} onClick={() => { createForm.setFieldsValue({ useDefaultQuota: true }); setCreateOpen(true); }}>添加账号</Button></div>
           <Row gutter={[16, 16]} className="summary-row">
             <Col xs={24} sm={8}><Card><div className="stat"><span className="stat-icon green"><TeamOutlined /></span><div><Text type="secondary">账号总数</Text><strong>{data?.summary.totalUsers.toLocaleString('zh-CN') ?? '0'}</strong></div></div></Card></Col>
@@ -296,6 +299,7 @@ function Dashboard({ session, onSignedOut }: { session: AuthSession; onSignedOut
               pagination={{ current: page, pageSize, total: data?.total ?? 0, showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100], showTotal: (total) => `共 ${total} 个账号`, onChange: (nextPage, nextSize) => { setPage(nextSize !== pageSize ? 1 : nextPage); setPageSize(nextSize); } }}
             />
           </section>
+          </>}
         </Content>
       </Layout>
 

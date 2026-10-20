@@ -41,6 +41,8 @@ type Config struct {
 	StorageQuotaBytes    int64
 	MaxUploadBytes       int64
 	MaxJSONBodyBytes     int64
+	BackupMaxBytes       int64
+	BackupTimeout        time.Duration
 	AllowedOrigins       []string
 	AllowedRedirects     []string
 	AuthRatePerMinute    int
@@ -78,6 +80,8 @@ func Load() (Config, error) {
 		StorageQuotaBytes:    envInt64("STORAGE_QUOTA_BYTES", 500*1024*1024),
 		MaxUploadBytes:       envInt64("MAX_UPLOAD_BYTES", 500*1024*1024),
 		MaxJSONBodyBytes:     envInt64("MAX_JSON_BODY_BYTES", 2*1024*1024),
+		BackupMaxBytes:       envInt64("BACKUP_MAX_BYTES", 50<<30),
+		BackupTimeout:        envDuration("BACKUP_TIMEOUT", 2*time.Hour),
 		AllowedOrigins:       csvEnv("CORS_ALLOWED_ORIGINS", "*"),
 		AllowedRedirects:     csvEnv("ALLOWED_REDIRECT_URLS", "http://localhost:3000,readest://auth-callback"),
 		AuthRatePerMinute:    envInt("AUTH_RATE_LIMIT_PER_MINUTE", 30),
@@ -100,6 +104,9 @@ func Load() (Config, error) {
 }
 
 func (c Config) Validate() error {
+	if c.BackupMaxBytes < 0 || c.BackupMaxBytes > 1<<60 || c.BackupTimeout < 0 {
+		return errors.New("backup size and timeout limits are invalid")
+	}
 	_, port, err := net.SplitHostPort(c.Addr)
 	portNumber, portErr := strconv.Atoi(port)
 	if err != nil || portErr != nil || portNumber < 1 || portNumber > 65535 {
