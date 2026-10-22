@@ -13,26 +13,26 @@ function AdminRoot() {
       locale={zhCN}
       theme={{
         token: {
-          colorPrimary: '#15765b',
-          colorInfo: '#15765b',
-          colorSuccess: '#238b61',
+          colorPrimary: '#5266d4',
+          colorInfo: '#5266d4',
+          colorSuccess: '#2f8b69',
           colorWarning: '#b36b18',
           colorError: '#bd3636',
           borderRadius: 10,
           controlHeight: 40,
-          colorText: '#233c33',
-          colorTextSecondary: '#718078',
-          colorBorder: '#dfe7e2',
-          colorBgLayout: '#f4f7f5',
+          colorText: '#252a36',
+          colorTextSecondary: '#6f7787',
+          colorBorder: '#e2e6ee',
+          colorBgLayout: '#f6f7f9',
           motion: !reduced,
           fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
         },
         components: {
-          Button: { primaryShadow: '0 4px 10px rgba(21, 118, 91, 0.16)', fontWeight: 550 },
-          Table: { headerBg: '#f7f9f8', headerColor: '#718078', headerSplitColor: 'transparent', rowHoverBg: '#f3f9f6', cellPaddingBlock: 18 },
+          Button: { primaryShadow: '0 3px 8px rgba(54, 70, 154, 0.14)', fontWeight: 550 },
+          Table: { headerBg: '#f8f9fb', headerColor: '#6f7787', headerSplitColor: 'transparent', rowHoverBg: '#f6f8fc', cellPaddingBlock: 18 },
           Card: { borderRadiusLG: 16 },
           Modal: { borderRadiusLG: 18 },
-          Menu: { darkItemBg: 'transparent', darkItemSelectedBg: '#245747', darkItemHoverBg: '#1c4036', itemHeight: 48, itemBorderRadius: 10 },
+          Menu: { darkItemBg: 'transparent', darkItemSelectedBg: '#303646', darkItemHoverBg: '#272c38', itemHeight: 48, itemBorderRadius: 10 },
         },
       }}
     >

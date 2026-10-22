@@ -138,7 +138,7 @@ export default function BackupPanel({ onSignedOut }: { onSignedOut: () => void }
       <div className="job-content"><div className="job-heading"><Typography.Text strong>{job.operation === 'restore' ? '恢复' : '备份'} · {job.phase}</Typography.Text><Typography.Text type="secondary">{date(job.startedAt)}</Typography.Text></div><Typography.Text type="secondary" className="job-filename">{job.name}</Typography.Text>{job.error && <p>{job.error}</p>}{job.safetyBackup && <p>恢复前安全备份：DATA_DIR/{job.safetyBackup}（使用本次恢复输入的备份密码）</p>}{running && <div className="task-progress" role="progressbar" aria-label="备份或恢复任务进行中"><span /></div>}</div>
     </section>}
     <div className="backup-workspace">
-    <Card className="destination-card" title={<Space><CloudServerOutlined />备份目标</Space>} extra={<Tag color={saved ? 'green' : 'default'}>{saved ? '已保存' : '待配置'}</Tag>}>
+    <Card className="destination-card" title={<Space><CloudServerOutlined />备份目标</Space>} extra={<Tag color={saved ? 'success' : 'default'}>{saved ? '已保存' : '待配置'}</Tag>}>
       <Typography.Paragraph type="secondary">选择存储方式并保存配置，后续操作将使用已保存的目标。</Typography.Paragraph>
       <Segmented<Provider> className="backup-provider" block aria-label="存储方式" value={provider} disabled={running || busy} onChange={next => { listRequest.current += 1; setProvider(next); }} options={[{ value: 'webdav', label: 'WebDAV', icon: <CloudOutlined aria-hidden /> }, { value: 's3', label: 'S3 / S3 兼容', icon: <DatabaseOutlined aria-hidden /> }]} />
       <Form form={configForm} layout="vertical" onFinish={saveConfig} disabled={running || busy}>

@@ -235,7 +235,7 @@ function Dashboard({ session, onSignedOut }: { session: AuthSession; onSignedOut
       render: (_, user) => (
         <Space><Avatar className={user.isAdmin ? 'admin-avatar' : ''} icon={<UserOutlined />} />
           <span className="account-cell"><Text strong>{user.name || user.email.split('@')[0]}</Text><Text type="secondary">{user.email}</Text></span>
-          {user.isAdmin && <Tag color="green">管理员</Tag>}
+          {user.isAdmin && <Tag className="role-tag">管理员</Tag>}
         </Space>
       ),
     },
@@ -304,7 +304,7 @@ function Dashboard({ session, onSignedOut }: { session: AuthSession; onSignedOut
           {section === 'backup' ? <BackupPanel onSignedOut={onSignedOut} /> : <>
           <div className="content-heading"><div><span className="page-eyebrow">读者与权限</span><Title level={3}>照看每一位读者</Title><Text type="secondary">管理账号与存储配额，让阅读有序发生。</Text></div><Button type="primary" icon={<PlusOutlined />} onClick={() => { createForm.setFieldsValue({ useDefaultQuota: true }); setCreateOpen(true); }}>添加账号</Button></div>
           <Row gutter={[16, 16]} className="summary-row">
-            <Col xs={8}><Card className="metric-card"><div className="stat"><span className="stat-icon green"><TeamOutlined /></span><div><Text type="secondary">账号总数</Text><AnimatedMetric value={data?.summary.totalUsers} /></div></div><span className="metric-caption">一起阅读的伙伴</span></Card></Col>
+            <Col xs={8}><Card className="metric-card"><div className="stat"><span className="stat-icon blue"><TeamOutlined /></span><div><Text type="secondary">账号总数</Text><AnimatedMetric value={data?.summary.totalUsers} /></div></div><span className="metric-caption">一起阅读的伙伴</span></Card></Col>
             <Col xs={8}><Card className="metric-card"><div className="stat"><span className="stat-icon amber"><CloudServerOutlined /></span><div><Text type="secondary">存储用量</Text><AnimatedMetric value={data?.summary.totalUsageBytes} format={formatBytes} /></div></div><span className="metric-caption">已保存到此服务器</span></Card></Col>
             <Col xs={8}><Card className="metric-card"><div className="stat"><span className="stat-icon gray"><BookOutlined /></span><div><Text type="secondary">存储文件</Text><AnimatedMetric value={data?.summary.totalFiles} /></div></div><span className="metric-caption">书籍与封面文件</span></Card></Col>
           </Row>
