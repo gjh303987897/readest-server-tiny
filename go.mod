@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	filippo.io/age v1.3.2
-	github.com/aws/aws-sdk-go-v2 v1.47.3
+	github.com/aws/aws-sdk-go-v2 v1.47.4
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.9
 	github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager v0.4.17
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.3
@@ -28,7 +28,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.11.7 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.14.6 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.20.6 // indirect
-	github.com/aws/smithy-go v1.28.5 // indirect
+	github.com/aws/smithy-go v1.28.6 // indirect
 	github.com/bytedance/sonic v1.11.6 // indirect
 	github.com/bytedance/sonic/loader v0.1.1 // indirect
 	github.com/cloudwego/base64x v0.1.4 // indirect
